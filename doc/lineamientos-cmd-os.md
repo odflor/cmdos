@@ -74,7 +74,9 @@ El enlazador reserva por defecto `$0800` bytes para la pila de C bajo `$B800`. L
 ## Material de referencia del repositorio
 
 - `lib/` contiene demostraciones independientes en C y sus `.prg` de VDC. `lorem128` y `vdc_real_40_columns` ensayan 40 columnas con el VDC. `spotlight128` desplaza una vista de 40 columnas. `vdc_blink`, `vdc_blink2` y `vdc_random_art` trabajan con atributos y VRAM. `mandala128` genera patrones de texto. Los `.bat` disponibles compilan ejemplos individuales.
-- `example.c` muestra el uso de la consola VDC de 80 columnas. `programa.prg` y `KeystoneKapers.prg` son binarios independientes en la raíz. `crazy-lander/` trae su propio fuente, documentación, compilador por lote y `.prg` para VIC-II. Ninguno entra en la imagen de CMD-OS.
+- [`lib/example.c`](../lib/example.c) es una demostración en C de la consola VDC de 80 columnas. Se puede compilar por separado con `cl65 -t c128 -O -o example-vdc.prg lib/example.c`.
+- [`doc/programa.prg`](programa.prg) y [`doc/KeystoneKapers.prg`](KeystoneKapers.prg) son binarios conservados como material de referencia. Ambos se trasladaron desde la raíz con su contenido intacto. El build de CMD-OS trabaja con los fuentes de `src/`, y estos binarios quedan fuera de la imagen D64.
+- `crazy-lander/` trae su propio fuente, documentación, compilador por lote y `.prg` para VIC-II. Se compila por separado.
 - `doc/c128 bootsect.7z` contiene `bootsect.128`, de 256 bytes. El proceso de compilación genera su propio sector.
 - `LICENSE` contiene la licencia MIT del repositorio. `.gitignore` excluye `build/` y los `.o`. Los scripts de Git trabajan sobre `main`. `bajar-cambios.ps1` usa `pull --rebase`; `subir-cambios.ps1` agrega todo el árbol antes de crear un commit y hacer push.
 
