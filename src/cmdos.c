@@ -4,12 +4,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "kernel/tui.h"
 
 #define CMDLINE_SIZE 80
 #define DIR_LFN      2
 #define PROGRAM_LFN  3
 
-/* CMDP applications are loaded into the temporary bank-0 area for now. */
 #define CMDP_HEADER_SIZE 16
 #define CMDP_FLAG_BANK0  0x01
 #define CMDP_FLAG_BANK1  0x02
@@ -213,6 +213,7 @@ static void show_help(void)
     cputs("\r\nComandos: DIR, RUN, A:, B:, C:, D:, M:, HELP, VER, EXIT\r\n");
     cputs("DIR muestra el contenido de la unidad activa.\r\n");
     cputs("RUN nombre.cmd carga una aplicacion CMD-OS.\r\n");
+    cputs("Tambien puede escribir solo el nombre de una aplicacion .cmd.\r\n");
     cputs("A: selecciona la unidad 8.\r\n");
     cputs("B: selecciona la unidad 9.\r\n");
     cputs("C: selecciona la unidad 10.\r\n");
@@ -260,6 +261,8 @@ static unsigned char run_program(const char* requested)
     unsigned int payload_size;
     unsigned char flags;
     int result;
+    unsigned int copied, chunk;
+    unsigned char bank1;
     void (*entry)(void);
 
     if (make_program_name(requested, name) != 0) {
@@ -293,22 +296,48 @@ static unsigned char run_program(const char* requested)
     entry_offset = little_endian_word(&header[8]);
     payload_size = little_endian_word(&header[10]);
 
-    if ((flags & CMDP_FLAG_BANK0) == 0) {
+    bank1 = flags == CMDP_FLAG_BANK1;
+    if (!bank1 && !(flags & CMDP_FLAG_BANK0)) {
         cbm_k_clall();
-        if ((flags & CMDP_FLAG_BANK1) != 0) {
-            cputs("ERROR: esta aplicacion requiere el banco 1; aun no esta habilitado.\r\n");
-        } else {
-            cputs("ERROR: la aplicacion no declara un banco compatible.\r\n");
-        }
+        cputs("ERROR: la aplicacion no declara un banco compatible.\r\n");
         return 1;
     }
 
-    if (header[12] > 1 || load_address != APP_LOAD_ADDRESS ||
-        entry_offset >= payload_size ||
-        payload_size > (APP_LOAD_LIMIT - APP_LOAD_ADDRESS)) {
+    if (entry_offset >= payload_size ||
+        (bank1 ? (header[12] != 2 || load_address != 0x1000 || payload_size > 0x2400)
+               : (header[12] > 1 || load_address != APP_LOAD_ADDRESS ||
+                  payload_size > (APP_LOAD_LIMIT - APP_LOAD_ADDRESS)))) {
         cbm_k_clall();
         cputs("ERROR: requisitos de memoria o API no compatibles.\r\n");
         return 1;
+    }
+
+    if (bank1) {
+        bank1_prepare(current_drive);
+        copied = 0;
+        while (copied < payload_size) {
+            chunk = payload_size - copied;
+            if (chunk > TUI_TRANSFER) {
+                chunk = TUI_TRANSFER;
+            }
+            if (cbm_read(PROGRAM_LFN, TUI_REQUEST.data, chunk) != (int)chunk) {
+                cbm_k_clall();
+                bank1_finish();
+                cputs("ERROR: no se pudo cargar completamente la aplicacion.\r\n");
+                return 1;
+            }
+            TUI_REQUEST.count = (unsigned char)chunk;
+            bank1_store(load_address + copied);
+            copied += chunk;
+        }
+        cbm_k_clall();
+        tui_editor_keys(1);
+        bank1_run(load_address + entry_offset);
+        tui_editor_keys(0);
+        bank1_finish();
+        tui_reset();
+        cputs("Aplicacion de banco 1 finalizada.\r\n");
+        return 0;
     }
 
     result = cbm_read(PROGRAM_LFN, (void*)load_address, payload_size);
@@ -323,6 +352,43 @@ static unsigned char run_program(const char* requested)
     entry();
     cputs("Aplicacion finalizada; regresando al interprete.\r\n");
     return 0;
+}
+
+static unsigned char run_implicit(const char* command)
+{
+    struct cbm_dirent entry;
+    char name[17];
+    unsigned int length = strlen(command);
+    unsigned char matched = 0;
+
+    if (length > 16 || strpbrk(command, " \t*?:,=$@\"") != 0) {
+        return 0;
+    }
+    if (length >= 4 && strcmp(command + length - 4, ".cmd") == 0) {
+        strcpy(name, command);
+    } else {
+        if (length > 12) {
+            return 0;
+        }
+        strcpy(name, command);
+        strcat(name, ".cmd");
+    }
+
+    if (cbm_opendir(DIR_LFN, current_drive) == 0) {
+        while (cbm_readdir(DIR_LFN, &entry) == 0) {
+            entry.name[16] = '\0';
+            if (entry.type != CBM_T_HEADER && strcmp(entry.name, name) == 0) {
+                matched = 1;
+                break;
+            }
+        }
+        cbm_closedir(DIR_LFN);
+    }
+    cbm_k_clall();
+    if (matched) {
+        run_program(name);
+    }
+    return matched;
 }
 
 static void select_drive(unsigned char drive)
@@ -342,7 +408,7 @@ void main(void)
     char command_upper[CMDLINE_SIZE];
 
     videomode(VIDEOMODE_80COL);
-    clrscr();
+    tui_reset();
     cputs("CMD-OS bootloader\r\n");
     cputs("Inicializando sistema nativo C128...\r\n");
     cputs("Consola de 80 columnas lista.\r\n");
@@ -364,8 +430,8 @@ void main(void)
 
         if (strcmp(command_upper, "DIR") == 0) {
             show_directory();
-        } else if (strncmp(command_upper, "RUN ", 4) == 0) {
-            char* program_name = command + 4;
+        } else if (strcmp(command_upper, "RUN") == 0 || strncmp(command_upper, "RUN ", 4) == 0) {
+            char* program_name = command + 3;
             trim_left(&program_name);
             if (*program_name == '\0') {
                 cputs("Uso: RUN nombre.cmd\r\n");
@@ -389,7 +455,7 @@ void main(void)
             select_drive(11);
         } else if (strcmp(command_upper, "M:") == 0) {
             cputs("M: esta reservada para el disco virtual en memoria.\r\n");
-        } else if (*command != '\0') {
+        } else if (*command != '\0' && !run_implicit(command)) {
             cputs("Comando no reconocido. Escriba HELP.\r\n");
         }
     }

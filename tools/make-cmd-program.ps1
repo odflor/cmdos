@@ -24,6 +24,9 @@ if ($LoadAddress -lt 0 -or $LoadAddress -gt 0xFFFF) {
 if ($Bank -ne 'BANK1' -and ($LoadAddress -ne 0x5000 -or $payload.Length -gt (0xB000 - 0x5000))) {
     throw 'El programa compatible con BANK0 debe cargar en $5000 y terminar antes de $B000.'
 }
+if ($Bank -eq 'BANK1' -and ($LoadAddress -ne 0x1000 -or $payload.Length -gt 0x2400 -or $ApiVersion -ne 2)) {
+    throw 'BANK1 requiere la API 2 y un programa de hasta $2400 bytes enlazado en $1000.'
+}
 if ($ApiVersion -lt 0 -or $ApiVersion -gt 255) {
     throw "La version de API no es valida: $ApiVersion."
 }

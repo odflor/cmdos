@@ -2,23 +2,21 @@
 
 ## Resumen ejecutivo
 
-CMD-OS es un proyecto de microsistema operativo al estilo DOS para el
-Commodore 128. Aprovecha el modo nativo del C128 y su pantalla VDC de 80 columnas
-para ofrecer una consola donde podés explorar discos y ejecutar programas
-escribiendo comandos.
+CMD-OS es un entorno al estilo DOS para el Commodore 128 en modo nativo. Arranca
+desde un disquete D64 y usa la pantalla VDC de 80 columnas con texto cian sobre
+negro. `dir` lista la unidad activa, `run nombre` o `nombre` ejecuta una
+aplicación `.cmd`, y `exit` devuelve el control a BASIC 7.0.
 
-El prototipo arranca desde una imagen de disquete que podés probar en VICE.
-Desde la consola, `dir` lista los archivos de la unidad activa, `run hello`
-carga un programa de demostración y vuelve al prompt al terminar, y `exit`
-te devuelve a BASIC 7.0.
+El intérprete y el kernel permanecen en el banco 0 y reanudan la consola al
+terminar cada aplicación. CMD-OS ejecuta una aplicación a la vez. `mem` muestra
+el mapa de memoria del banco 0. `edit` usa el banco 1 para documentos SEQ de
+hasta 34 KiB y ofrece menús desplegables, diálogos y guardado con respaldo al
+reemplazar un archivo existente.
 
-La idea es que el intérprete quede en memoria para retomar el trabajo enseguida
-después de cada programa. CMD-OS ejecutará una aplicación a la vez, con servicios
-comunes de pantalla, teclado y disco. Los comandos pequeños usarán el espacio
-libre del primer banco de memoria y los programas más grandes podrán usar el
-segundo. Por ahora, el prototipo ejecuta programas externos en el primer banco.
-El segundo banco, los servicios comunes y los archivos por lotes son próximos
-pasos del proyecto.
+La API común ofrece servicios de pantalla, teclado y disco. En los diálogos de
+archivo, Enter con el nombre vacío muestra una lista filtrada por el tipo que
+corresponde. Las flechas y Enter permiten elegir, y Esc cancela. Los archivos por
+lotes y el disco virtual `M:` siguen pendientes.
 
 Los [lineamientos de CMD-OS](doc/lineamientos-cmd-os.md) reúnen las decisiones de
 diseño, el estado del prototipo y las instrucciones para retomar el trabajo en otra máquina.
@@ -32,8 +30,10 @@ diseño, el estado del prototipo y las instrucciones para retomar el trabajo en 
 - Editor de línea mediante KERNAL/CC65.
 - `DIR` para leer el directorio de la unidad activa.
 - `EXIT` para regresar al BASIC 7.0.
-- `RUN nombre.cmd` para cargar una aplicación externa CMD-OS.
+- `RUN nombre.cmd` para cargar una aplicación externa. También podés escribir solo `nombre` o `nombre.cmd` si coincide con un CMDP de la unidad activa.
 - `run mem` para ver las direcciones inicial y final de cada segmento de CMD-OS en el banco 0, junto con las reservas para aplicaciones y pilas.
+- `run edit` para editar archivos de texto secuenciales de hasta 34 KiB en el banco 1. F7 abre los menús Archivo y Edición. Usa las flechas para navegar, Enter para elegir y Esc para cerrar el menú. F1 abre, F3 guarda, F5 guarda con otro nombre y F2 y F4 llevan al comienzo y al final. **Archivo → Nuevo** abre un documento en blanco y **Archivo → Salir** vuelve al intérprete.
+- En los diálogos de archivo del editor, Enter con el nombre vacío lista los archivos SEQ de la unidad activa. Esc cancela tanto el diálogo como el selector.
 - Selección `A:` = dispositivo 8, `B:` = 9, `C:` = 10 y `D:` = 11.
 - Reserva de `M:` para el futuro disco virtual en memoria.
 
@@ -43,10 +43,10 @@ El sistema conserva el kernel y el intérprete en memoria. `RUN` carga programas
 con formato `CMDP` en la zona temporal del banco 0, los ejecuta sin el stub de
 BASIC y devuelve el control al intérprete cuando terminan.
 
-La primera aplicación de prueba es `hello.cmd`. Su cabecera ya incluye una
-bandera de banco: el cargador acepta `BANK0` en esta versión y deja preparado el
-formato para `BANK1`, que se implementará junto con el cambio de MMU y la API
-común del kernel.
+`hello.cmd` y `mem.cmd` se ejecutan en el banco 0. `edit.cmd` se ejecuta en
+el banco 1 y usa la API del kernel para dibujar, leer teclas y acceder a la
+unidad activa. Los archivos del editor se guardan como `SEQ` en PETSCII,
+con retorno de carro al final de línea.
 
 ## Compilar y ejecutar
 
