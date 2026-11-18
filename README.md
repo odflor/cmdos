@@ -13,8 +13,20 @@ Primer prototipo de un entorno de línea de comandos nativo para Commodore 128.
 - Editor de línea mediante KERNAL/CC65.
 - `DIR` para leer el directorio de la unidad activa.
 - `EXIT` para regresar al BASIC 7.0.
+- `RUN nombre.cmd` para cargar una aplicación externa CMD-OS.
 - Selección `A:` = dispositivo 8, `B:` = 9, `C:` = 10 y `D:` = 11.
 - Reserva de `M:` para el futuro disco virtual en memoria.
+
+## Prototipo de aplicaciones externas
+
+El sistema conserva el kernel y el intérprete en memoria. `RUN` carga programas
+con formato `CMDP` en la zona temporal del banco 0, los ejecuta sin el stub de
+BASIC y devuelve el control al intérprete cuando terminan.
+
+La primera aplicación de prueba es `hello.cmd`. Su cabecera ya incluye una
+bandera de banco: el cargador acepta `BANK0` en esta versión y deja preparado el
+formato para `BANK1`, que se implementará junto con el cambio de MMU y la API
+común del kernel.
 
 ## Compilar y ejecutar
 

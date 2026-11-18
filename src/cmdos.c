@@ -7,9 +7,23 @@
 
 #define CMDLINE_SIZE 80
 #define DIR_LFN      2
+#define PROGRAM_LFN  3
+
+/* CMDP applications are loaded into the temporary bank-0 area for now. */
+#define CMDP_HEADER_SIZE 16
+#define CMDP_FLAG_BANK0  0x01
+#define CMDP_FLAG_BANK1  0x02
+#define APP_LOAD_ADDRESS 0xB002
+#define APP_LOAD_LIMIT   0xD000
 
 static unsigned char current_drive = 8;
 static char command_line[CMDLINE_SIZE];
+
+static unsigned int little_endian_word(const unsigned char* bytes)
+{
+    return (unsigned int)bytes[0] |
+           ((unsigned int)bytes[1] << 8);
+}
 
 static char drive_letter(void)
 {
@@ -30,6 +44,16 @@ static void trim_left(char** text)
 {
     while (**text == ' ' || **text == '\t') {
         ++(*text);
+    }
+}
+
+static void trim_right(char* text)
+{
+    unsigned int length = (unsigned int)strlen(text);
+
+    while (length > 0 &&
+           (text[length - 1] == ' ' || text[length - 1] == '\t')) {
+        text[--length] = '\0';
     }
 }
 
@@ -187,8 +211,9 @@ static void show_directory(void)
 
 static void show_help(void)
 {
-    cputs("\r\nComandos: DIR, A:, B:, C:, D:, M:, HELP, VER, EXIT\r\n");
+    cputs("\r\nComandos: DIR, RUN, A:, B:, C:, D:, M:, HELP, VER, EXIT\r\n");
     cputs("DIR muestra el contenido de la unidad activa.\r\n");
+    cputs("RUN nombre.cmd carga una aplicacion CMD-OS.\r\n");
     cputs("A: selecciona la unidad 8.\r\n");
     cputs("B: selecciona la unidad 9.\r\n");
     cputs("C: selecciona la unidad 10.\r\n");
@@ -197,6 +222,108 @@ static void show_help(void)
     cputs("HELP muestra esta ayuda.\r\n");
     cputs("VER muestra la version de CMD-OS.\r\n");
     cputs("EXIT regresa al BASIC 7.0.\r\n");
+}
+
+static unsigned char has_extension(const char* name)
+{
+    while (*name) {
+        if (*name == '.') {
+            return 1;
+        }
+        ++name;
+    }
+    return 0;
+}
+
+static unsigned char make_program_name(const char* requested, char* name)
+{
+    unsigned int length = (unsigned int)strlen(requested);
+
+    if (length == 0 || length >= 31) {
+        return 1;
+    }
+    strcpy(name, requested);
+    if (!has_extension(name)) {
+        if (length + 4 >= 31) {
+            return 1;
+        }
+        strcat(name, ".cmd");
+    }
+    return 0;
+}
+
+static unsigned char run_program(const char* requested)
+{
+    unsigned char header[CMDP_HEADER_SIZE];
+    char name[32];
+    unsigned int load_address;
+    unsigned int entry_offset;
+    unsigned int payload_size;
+    unsigned char flags;
+    int result;
+    void (*entry)(void);
+
+    if (make_program_name(requested, name) != 0) {
+        cputs("ERROR: nombre de programa demasiado largo.\r\n");
+        return 1;
+    }
+
+    result = cbm_open(PROGRAM_LFN, current_drive, CBM_READ, name);
+    if (result != 0) {
+        directory_error((unsigned char)result, "abrir la aplicacion");
+        return 1;
+    }
+
+    result = cbm_read(PROGRAM_LFN, header, CMDP_HEADER_SIZE);
+    if (result != CMDP_HEADER_SIZE) {
+        cbm_k_clall();
+        cputs("ERROR: la aplicacion no tiene una cabecera CMDP valida.\r\n");
+        return 1;
+    }
+
+    /* CMDP is an on-disk binary signature, not a PETSCII C string. */
+    if (header[0] != 0x43 || header[1] != 0x4D ||
+        header[2] != 0x44 || header[3] != 0x50 || header[4] != 1) {
+        cbm_k_clall();
+        cputs("ERROR: formato CMDP o version no reconocidos.\r\n");
+        return 1;
+    }
+
+    flags = header[5];
+    load_address = little_endian_word(&header[6]);
+    entry_offset = little_endian_word(&header[8]);
+    payload_size = little_endian_word(&header[10]);
+
+    if ((flags & CMDP_FLAG_BANK0) == 0) {
+        cbm_k_clall();
+        if ((flags & CMDP_FLAG_BANK1) != 0) {
+            cputs("ERROR: esta aplicacion requiere el banco 1; aun no esta habilitado.\r\n");
+        } else {
+            cputs("ERROR: la aplicacion no declara un banco compatible.\r\n");
+        }
+        return 1;
+    }
+
+    if (header[12] > 1 || load_address != APP_LOAD_ADDRESS ||
+        entry_offset >= payload_size ||
+        payload_size > (APP_LOAD_LIMIT - APP_LOAD_ADDRESS)) {
+        cbm_k_clall();
+        cputs("ERROR: requisitos de memoria o API no compatibles.\r\n");
+        return 1;
+    }
+
+    result = cbm_read(PROGRAM_LFN, (void*)load_address, payload_size);
+    cbm_k_clall();
+    if (result != (int)payload_size) {
+        cputs("ERROR: no se pudo cargar completamente la aplicacion.\r\n");
+        return 1;
+    }
+
+    cprintf("Ejecutando %s en banco 0...\r\n", name);
+    entry = (void (*)(void))(load_address + entry_offset);
+    entry();
+    cputs("Aplicacion finalizada; regresando al interprete.\r\n");
+    return 0;
 }
 
 static void select_drive(unsigned char drive)
@@ -213,6 +340,7 @@ static void prompt(void)
 void main(void)
 {
     char* command;
+    char command_upper[CMDLINE_SIZE];
 
     videomode(VIDEOMODE_80COL);
     clrscr();
@@ -229,28 +357,38 @@ void main(void)
         if (cgets(command_line, CMDLINE_SIZE) == 0) {
             continue;
         }
-        uppercase(command_line);
         command = command_line;
         trim_left(&command);
+        trim_right(command);
+        strcpy(command_upper, command);
+        uppercase(command_upper);
 
-        if (strcmp(command, "DIR") == 0 || strcmp(command, "DIR ") == 0) {
+        if (strcmp(command_upper, "DIR") == 0) {
             show_directory();
-        } else if (strcmp(command, "HELP") == 0) {
+        } else if (strncmp(command_upper, "RUN ", 4) == 0) {
+            char* program_name = command + 4;
+            trim_left(&program_name);
+            if (*program_name == '\0') {
+                cputs("Uso: RUN nombre.cmd\r\n");
+            } else {
+                run_program(program_name);
+            }
+        } else if (strcmp(command_upper, "HELP") == 0) {
             show_help();
-        } else if (strcmp(command, "VER") == 0) {
-            cputs("CMD-OS 0.1.0 - prototipo C128 nativo\r\n");
-        } else if (strcmp(command, "EXIT") == 0) {
+        } else if (strcmp(command_upper, "VER") == 0) {
+            cputs("CMD-OS 0.2.0 - kernel comun y aplicaciones CMDP\r\n");
+        } else if (strcmp(command_upper, "EXIT") == 0) {
             cputs("Regresando a BASIC 7.0...\r\n");
             exit(EXIT_SUCCESS);
-        } else if (strcmp(command, "A:") == 0) {
+        } else if (strcmp(command_upper, "A:") == 0) {
             select_drive(8);
-        } else if (strcmp(command, "B:") == 0) {
+        } else if (strcmp(command_upper, "B:") == 0) {
             select_drive(9);
-        } else if (strcmp(command, "C:") == 0) {
+        } else if (strcmp(command_upper, "C:") == 0) {
             select_drive(10);
-        } else if (strcmp(command, "D:") == 0) {
+        } else if (strcmp(command_upper, "D:") == 0) {
             select_drive(11);
-        } else if (strcmp(command, "M:") == 0) {
+        } else if (strcmp(command_upper, "M:") == 0) {
             cputs("M: esta reservada para el disco virtual en memoria.\r\n");
         } else if (*command != '\0') {
             cputs("Comando no reconocido. Escriba HELP.\r\n");
