@@ -1,11 +1,11 @@
 # Lineamientos de CMD-OS
 
-Reconstrucción a partir del repositorio y sus commits `3c6e15a`, `aa08ad1` y `92c5b9b`. El intérprete se identifica como **CMD-OS 0.2.0**. Los contratos actuales salen de los fuentes. El orden de evolución al final es una propuesta.
+Documento de continuidad del proyecto. Integra los lineamientos del repositorio con las decisiones de diseño de las conversaciones de trabajo. El intérprete se identifica como **CMD-OS 0.2.0**. Las secciones de arquitectura describen el diseño acordado y los contratos del prototipo se documentan con el código como referencia. El orden de evolución al final es una propuesta.
 
 ## Plataforma y arranque
 
 - Desarrollar para Commodore 128 en modo nativo, con CC65 (`-t c128`), C para el intérprete y ca65 para el arranque de aplicaciones. La consola usa el VDC de 80 columnas y las rutinas de pantalla, teclado y disco de CC65/KERNAL.
-- El artefacto principal es `build/cmd-os.d64`, montado en el dispositivo 8. `build.ps1` compila `boot.prg` y `hello.raw`, empaqueta `hello.cmd` y escribe `boot` y `hello.cmd` con `c1541`. `tools/make-boot-sector.ps1` instala el sector de autoboot en pista 1, sector 0. El sector lleva la firma `CBM` y transfiere el control a BASIC con `RUN"BOOT"` mediante la entrada ROM `$AFA5`; `boot.prg` conserva el stub de BASIC generado por CC65.
+- El artefacto principal es `build/cmd-os.d64`, montado en el dispositivo 8. `build.ps1` compila y empaqueta los programas y escribe `boot`, `hello.cmd` y `mem.cmd` con `c1541`. `tools/make-boot-sector.ps1` instala el sector de autoboot en pista 1, sector 0. El sector lleva la firma `CBM` y transfiere el control a BASIC con `RUN"BOOT"` mediante la entrada ROM `$AFA5`. Preservar este autoboot y el stub de BASIC de `boot.prg`.
 - `run-vice.ps1` monta la imagen con `x128`. Los scripts apuntan a rutas de CC65 y VICE en `D:`. `boot.cmd` es otro lanzador de VICE con rutas absolutas y un disco adicional en el dispositivo 9.
 
 ## Consola y discos
@@ -23,17 +23,23 @@ La comparación de comandos ignora diferencias entre las letras ASCII minúscula
 
 ## Arquitectura de memoria y servicios del kernel
 
-El **kernel de CMD-OS y el intérprete de comandos quedan residentes en Bank 0**. Las aplicaciones CMDP pequeñas se cargan en el espacio disponible de Bank 0. Las aplicaciones grandes se cargan en Bank 1 y deben poder volver al intérprete cuando terminen.
+El diseño acordado mantiene el **kernel de CMD-OS y el intérprete residentes**. El kernel tiene su base en Bank 0 y una puerta de entrada en RAM común visible desde ambos bancos. El intérprete usa los mismos servicios públicos que las aplicaciones y queda suspendido mientras se ejecuta un programa. Al finalizar, retoma la ejecución en memoria, sin recargarse desde disco. Esto es especialmente importante para encadenar comandos externos en archivos por lotes.
 
-El kernel debe estar disponible durante toda la ejecución. El intérprete y las aplicaciones CMDP de ambos bancos deben poder invocar sus servicios mediante una API común. La implementación del kernel reside en Bank 0. Para que una aplicación en Bank 1 pueda llamarla, el diseño debe prever un punto de entrada accesible con ambos mapas de memoria. Ese punto de entrada debe permitir pasar al mapa del kernel, ejecutar el servicio y restaurar el mapa de la aplicación antes de devolverle el control.
+Solo se ejecuta **una aplicación a la vez**, sin multitarea ni aplicaciones residentes. Una aplicación pequeña se enlaza para la ventana temporal de Bank 0, junto al intérprete. Una aplicación grande se prepara para Bank 1 y puede usar la ventana temporal de Bank 0 como memoria auxiliar para textos, gráficos, música u otros datos. Los comandos por lotes y las aplicaciones interactivas pueden pertenecer a cualquiera de las dos clases. El banco depende del mapa para el que se enlazó el binario y de sus requisitos de memoria.
 
-Queda por definir la ubicación de ese punto de entrada, la convención de llamada, el manejo de interrupciones durante el cambio de mapa y cómo el kernel leerá o escribirá buffers de una aplicación en Bank 1. El espacio disponible en cada banco se fijará al cerrar el mapa de memoria. Las banderas CMDP declaran los bancos compatibles con la aplicación.
+La API común debe empezar con servicios de consola, teclado y disco. La puerta de entrada debe poder seleccionar el mapa apropiado para el servicio y restaurar el de la aplicación antes de devolverle el control. Queda por fijar qué parte del kernel cabrá en RAM común, la ubicación y versión de la ABI, las convenciones de llamada y la preservación de página cero, pilas, MMU e interrupciones.
+
+La ventana temporal de Bank 0 se presta por completo al programa activo. Puede contener una aplicación pequeña o los recursos de una grande. Al regresar al intérprete se invalida toda esa asignación y la siguiente ejecución puede reutilizarla. Para acceder a recursos desde Bank 1, se propone usar identificadores y copias por bloques a través del kernel. Un puntero C corriente expresa una dirección del mapa activo. El servicio que cruza bancos necesita conocer también el banco del búfer.
+
+El prototipo actual integra el intérprete y el cargador en el programa de arranque. La API pública, la puerta de entrada común, la ejecución en Bank 1 y el préstamo de recursos siguen pendientes.
 
 ## Aplicaciones externas
 
 ### Filosofía de uso de la memoria
 
-`src/cmdos.c` conserva el estado del intérprete, incluida la unidad activa, mientras `RUN` presta a una aplicación una zona temporal de RAM. El cargador lee primero la cabecera, comprueba los requisitos y copia el ejecutable directamente a su dirección de enlace. Cierra los canales antes de llamar a la entrada del programa. La llamada es síncrona y el intérprete sigue desde el mismo punto cuando la aplicación retorna. De ahí se infiere un modelo de **una aplicación a la vez y memoria reutilizable**. La siguiente ejecución puede sobrescribir el área anterior. Cada binario se enlaza para su ubicación y el formato actual carece de un mecanismo de reubicación.
+`src/cmdos.c` conserva el estado del intérprete, incluida la unidad activa, mientras `RUN` presta a una aplicación una zona temporal de RAM. El cargador lee primero la cabecera, comprueba los requisitos y copia el ejecutable directamente a su dirección de enlace. Cierra los canales antes de llamar a la entrada del programa. La llamada es síncrona y el intérprete sigue desde el mismo punto cuando la aplicación retorna. Cada binario se enlaza para su ubicación y el formato actual carece de un mecanismo de reubicación. La bandera declara compatibilidad y no modifica las direcciones del binario.
+
+Para los comandos externos por lotes, el intérprete deberá pasar argumentos y recibir un código de salida al recuperar el control. Así podrá seguir con la próxima línea y, más adelante, tomar decisiones según el resultado. El contrato de argumentos, la sintaxis de lotes y la exposición del código de salida quedan pendientes. También queda como ampliación la posibilidad de elegir un intérprete al arrancar mediante un archivo de configuración.
 
 `src/apps/hello.c` valida el flujo mínimo. Usa `cputs` y `cgetc` sobre la consola que el intérprete ya abrió, espera una tecla y sale de `main`. El programa trae rutinas de CC65 enlazadas en su propio binario. El servicio compartido que demuestra es la consola del C128. Las llamadas a la futura API del kernel de CMD-OS quedan por implementar. La salida de `HELLO` permanece visible al volver al prompt.
 
@@ -57,6 +63,8 @@ En Bank 1 se mantiene la misma idea de área temporal. Lo que cambia es el banco
 ### Cabecera CMDP v1
 
 La cabecera ocupa 16 bytes, seguida por el ejecutable crudo sin dirección PRG ni stub BASIC. Los campos de dos bytes se guardan en orden little-endian.
+
+Comparar la firma como bytes fijos. Los literales de caracteres de CC65 para C128 pueden tener valores PETSCII distintos de los bytes binarios de la cabecera. Mantener en minúsculas los nombres grabados en la imagen y conservar el nombre recibido por `RUN`.
 
 | Offset hexadecimal | Campo | Comportamiento actual |
 | --- | --- | --- |
@@ -91,7 +99,7 @@ El enlazador reserva por defecto `$0800` bytes para la pila de C bajo `$B800`. L
 
 ## Retomar el proyecto en otra máquina
 
-Publicar en Git los cambios que se quieran trasladar, incluido este documento, antes de cambiar de equipo. En la otra máquina, clonar el mismo repositorio o actualizar la copia existente. Abrir esa carpeta en Codex y empezar con este mensaje:
+Usar este documento versionado para trasladar el contexto entre máquinas. Al cerrar una sesión, actualizar aquí las decisiones, el estado comprobado y el siguiente paso. Revisar los cambios, incluir el documento en un commit y publicar la rama en GitHub. En la otra máquina, clonar el repositorio o actualizar la copia existente con `git pull --ff-only origin main` desde `main`. Abrir esa carpeta en Codex y empezar con este mensaje:
 
 > Lee `doc/lineamientos-cmd-os.md` y usa su historial como contexto. Revisa el estado del repositorio y retomemos CMD-OS desde allí.
 
@@ -106,7 +114,9 @@ Adaptar las rutas a la instalación de cada equipo. La comprobación básica usa
 
 ## Orden de evolución propuesto
 
-1. Validar una imagen recién generada en `x128`: arranque desde el dispositivo 8, `VER`, `DIR`, `RUN HELLO` y regreso al prompt, selección de unidades, manejo de archivos inválidos y `EXIT` a BASIC.
+1. Validar una imagen recién generada en `x128`. Comprobar el autoboot desde el dispositivo 8, `ver`, `dir`, `run hello`, `run mem`, el regreso al prompt, las unidades, el manejo de archivos inválidos y `exit` a BASIC.
 2. Mantener el mapa de Bank 0 con las zonas del intérprete y de la aplicación separadas. Reservar el espacio de Bank 1 para las aplicaciones grandes y definir qué estado de pantalla y sistema debe preservar cada aplicación al retornar.
 3. Definir la API común del kernel y su punto de entrada para ambos bancos. Validar primero una llamada desde el intérprete y desde `hello.cmd` en Bank 0. Extender después el cargador y el runtime a Bank 1 y comprobar que una aplicación pueda llamar al mismo servicio, continuar su ejecución y devolver el control al intérprete.
-4. Definir la capacidad, el formato y el acceso del disco virtual `M:`. Incorporarlo a `DIR` y `RUN` cuando disponga de lectura de directorio y archivos.
+4. Probar el uso de la ventana temporal de Bank 0 para recursos de una aplicación Bank 1 y la reutilización de esa misma ventana por una aplicación Bank 0 después del retorno.
+5. Pasar argumentos y devolver códigos de salida. Validar una secuencia de comandos externos que conserve el estado del intérprete entre ejecuciones.
+6. Definir la capacidad, el formato y el acceso del disco virtual `M:`. Incorporarlo a `DIR` y `RUN` cuando disponga de lectura de directorio y archivos.

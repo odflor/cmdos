@@ -1,8 +1,27 @@
 # CMD-OS
 
-A DOS-like operating system for the C128
+## Resumen ejecutivo
 
-Primer prototipo de un entorno de línea de comandos nativo para Commodore 128.
+CMD-OS es un proyecto de microsistema operativo al estilo DOS para el
+Commodore 128. Aprovecha el modo nativo del C128 y su pantalla VDC de 80 columnas
+para ofrecer una consola donde podés explorar discos y ejecutar programas
+escribiendo comandos.
+
+El prototipo arranca desde una imagen de disquete que podés probar en VICE.
+Desde la consola, `dir` lista los archivos de la unidad activa, `run hello`
+carga un programa de demostración y vuelve al prompt al terminar, y `exit`
+te devuelve a BASIC 7.0.
+
+La idea es que el intérprete quede en memoria para retomar el trabajo enseguida
+después de cada programa. CMD-OS ejecutará una aplicación a la vez, con servicios
+comunes de pantalla, teclado y disco. Los comandos pequeños usarán el espacio
+libre del primer banco de memoria y los programas más grandes podrán usar el
+segundo. Por ahora, el prototipo ejecuta programas externos en el primer banco.
+El segundo banco, los servicios comunes y los archivos por lotes son próximos
+pasos del proyecto.
+
+Los [lineamientos de CMD-OS](doc/lineamientos-cmd-os.md) reúnen las decisiones de
+diseño, el estado del prototipo y las instrucciones para retomar el trabajo en otra máquina.
 
 ## Funciones actuales
 
