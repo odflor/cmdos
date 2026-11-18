@@ -13,8 +13,9 @@
 #define CMDP_HEADER_SIZE 16
 #define CMDP_FLAG_BANK0  0x01
 #define CMDP_FLAG_BANK1  0x02
-#define APP_LOAD_ADDRESS 0xB002
-#define APP_LOAD_LIMIT   0xD000
+#define APP_LOAD_ADDRESS 0x5000
+/* The application's C stack starts at $B000. */
+#define APP_LOAD_LIMIT   0xB000
 
 static unsigned char current_drive = 8;
 static char command_line[CMDLINE_SIZE];
@@ -97,9 +98,9 @@ static unsigned char read_disk_header(void)
 {
     char title[17];
     char disk_id[3];
+    char dos_type[3];
     unsigned char byte;
     unsigned char count = 0;
-    unsigned char id_count = 0;
     unsigned char index;
 
     if (cbm_open(DIR_LFN, current_drive, CBM_READ, "$") != 0) {
@@ -124,31 +125,32 @@ static unsigned char read_disk_header(void)
         return 3;
     }
 
-    while (count < 16 && !cbm_k_readst()) {
+    while (!cbm_k_readst()) {
         byte = cbm_k_basin();
-        if (byte == '"') {
+        if (byte == '"' || byte == 0) {
             break;
         }
-        title[count++] = (char)byte;
+        if (count < 16) {
+            title[count++] = (char)byte;
+        }
     }
     title[count] = '\0';
 
-    while (!cbm_k_readst()) {
-        byte = cbm_k_basin();
-        if (byte == 0) {
-            break;
-        }
-        if ((byte >= '0' && byte <= '9') ||
-            (byte >= 'A' && byte <= 'Z')) {
-            if (id_count < 2) {
-                disk_id[id_count++] = (char)byte;
-            } else {
-                disk_id[0] = disk_id[1];
-                disk_id[1] = (char)byte;
-            }
-        }
+    /* After the closing quote: space, two-byte ID, space, two-byte DOS type.
+       Preserve the original PETSCII bytes, including either letter case. */
+    if (byte != '"' || cbm_k_readst()) {
+        cbm_k_clrch();
+        cbm_k_clall();
+        return 3;
     }
-    disk_id[id_count] = '\0';
+    cbm_k_basin();
+    disk_id[0] = (char)cbm_k_basin();
+    disk_id[1] = (char)cbm_k_basin();
+    disk_id[2] = '\0';
+    cbm_k_basin();
+    dos_type[0] = (char)cbm_k_basin();
+    dos_type[1] = (char)cbm_k_basin();
+    dos_type[2] = '\0';
 
     cbm_k_bsout(0x12);
     cbm_k_bsout('"');
@@ -157,12 +159,9 @@ static unsigned char read_disk_header(void)
     }
     cbm_k_bsout('"');
     cputs(" ");
-    if (id_count == 2) {
-        cbm_k_bsout((unsigned char)disk_id[0]);
-        cbm_k_bsout((unsigned char)disk_id[1]);
-    } else {
-        cputs("--");
-    }
+    print_name(disk_id);
+    cputs(" ");
+    print_name(dos_type);
     cbm_k_bsout(0x92);
     cputs("\r\n\r\n");
     cbm_k_clrch();

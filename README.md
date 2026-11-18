@@ -14,6 +14,7 @@ Primer prototipo de un entorno de línea de comandos nativo para Commodore 128.
 - `DIR` para leer el directorio de la unidad activa.
 - `EXIT` para regresar al BASIC 7.0.
 - `RUN nombre.cmd` para cargar una aplicación externa CMD-OS.
+- `run mem` para ver las direcciones inicial y final de cada segmento de CMD-OS en el banco 0, junto con las reservas para aplicaciones y pilas.
 - Selección `A:` = dispositivo 8, `B:` = 9, `C:` = 10 y `D:` = 11.
 - Reserva de `M:` para el futuro disco virtual en memoria.
 
@@ -38,3 +39,5 @@ Desde PowerShell:
 ```
 
 La imagen resultante queda en `build\cmd-os.d64`.
+`build.ps1` genera `build\boot.map` con el mapa de enlace que usa `mem.cmd`.
+Si CC65 o VICE están instalados en otras rutas, indícalas con `-Cc65Bin` y `-ViceBin`.

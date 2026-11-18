@@ -7,7 +7,7 @@ param(
     [ValidateSet('BANK0', 'BANK1', 'BOTH')]
     [string] $Bank,
     [Parameter(Mandatory = $false)]
-    [int] $LoadAddress = 0xB002,
+    [int] $LoadAddress = 0x5000,
     [Parameter(Mandatory = $false)]
     [int] $ApiVersion = 1
 )
@@ -20,6 +20,9 @@ if ($payload.Length -eq 0) {
 }
 if ($LoadAddress -lt 0 -or $LoadAddress -gt 0xFFFF) {
     throw "La direccion de carga no es valida: $LoadAddress."
+}
+if ($Bank -ne 'BANK1' -and ($LoadAddress -ne 0x5000 -or $payload.Length -gt (0xB000 - 0x5000))) {
+    throw 'El programa compatible con BANK0 debe cargar en $5000 y terminar antes de $B000.'
 }
 if ($ApiVersion -lt 0 -or $ApiVersion -gt 255) {
     throw "La version de API no es valida: $ApiVersion."

@@ -1,38 +1,70 @@
+param(
+    [string] $Cc65Bin = 'D:\cc65\bin',
+    [string] $ViceBin = 'D:\GTK3VICE-3.10-win64\bin'
+)
+
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$cc65Bin = 'D:\cc65\bin'
-$viceBin = 'D:\GTK3VICE-3.10-win64\bin'
 $buildDir = Join-Path $projectRoot 'build'
 $source = Join-Path $projectRoot 'src\cmdos.c'
 $program = Join-Path $buildDir 'boot.prg'
-$appSource = Join-Path $projectRoot 'src\apps\hello.c'
+$map = Join-Path $buildDir 'boot.map'
+$memoryInclude = Join-Path $buildDir 'cmdos-memory.inc'
 $appCrt0 = Join-Path $projectRoot 'src\runtime\cmdos-app-crt0.s'
 $appCfg = Join-Path $projectRoot 'cfg\cmdos-app-bank0.cfg'
-$appRaw = Join-Path $buildDir 'hello.raw'
-$appCmd = Join-Path $buildDir 'hello.cmd'
 $disk = Join-Path $buildDir 'cmd-os.d64'
 
 New-Item -ItemType Directory -Force $buildDir | Out-Null
 
-& (Join-Path $cc65Bin 'cl65.exe') -t c128 -O -o $program $source
+$cl65 = Join-Path $Cc65Bin 'cl65.exe'
+& $cl65 -t c128 -O -m $map -o $program $source
 if ($LASTEXITCODE -ne 0) { throw "CC65 no pudo compilar CMD-OS." }
 
-# Build the first external application without the BASIC startup header.
-& (Join-Path $cc65Bin 'cl65.exe') -t c128 -O -C $appCfg -o $appRaw $appSource $appCrt0
-if ($LASTEXITCODE -ne 0) { throw "CC65 no pudo compilar la aplicacion HELLO." }
+# Extract the segment table; LOADADDR is the PRG file prefix, not a RAM segment.
+$mapText = [IO.File]::ReadAllText($map)
+$segmentTable = [regex]::Match($mapText, '(?ms)^Segment list:\s*\r?\n(.*?)^Exports list').Groups[1].Value
+$segments = [regex]::Matches($segmentTable, '(?m)^([A-Z][A-Z0-9_]*)[ \t]+([0-9A-F]{6})[ \t]+([0-9A-F]{6})[ \t]+([0-9A-F]{6})[ \t]+[0-9A-F]{5}\s*$')
+if ('STARTUP' -notin @($segments | ForEach-Object { $_.Groups[1].Value })) {
+    throw 'No se pudo leer la tabla de segmentos de boot.map.'
+}
+$residentEnd = 0
+$memoryRows = foreach ($segment in $segments) {
+    $name, $start, $end, $size = $segment.Groups[1..4].Value
+    if ($name -ne 'LOADADDR' -and $size -ne '000000') {
+        $endAddress = [Convert]::ToInt32($end, 16)
+        if ($endAddress -ge 0x5000) {
+            throw "El segmento $name de CMD-OS invade la zona reservada para aplicaciones."
+        }
+        $residentEnd = [Math]::Max($residentEnd, $endAddress)
+        '    {{ "{0}", 0x{1}, 0x{2}, 0 }},' -f $name, $start, $end
+    }
+}
+if ($residentEnd -lt 0x4FFF) {
+    $memoryRows += '    {{ "RAM libre para CMD-OS", 0x{0:X4}, 0x4FFF, 1 }},' -f ($residentEnd + 1)
+}
+$memoryRows += '    { "Area CMDP (reserva)", 0x5000, 0xAFFF, 0 },',
+    '    { "Pila C CMDP (reserva)", 0xB000, 0xB7FF, 0 },',
+    '    { "Pila C CMD-OS (reserva)", 0xB800, 0xBFFF, 0 },'
+Set-Content -LiteralPath $memoryInclude -Value $memoryRows -Encoding Ascii
 
-& (Join-Path $projectRoot 'tools\make-cmd-program.ps1') `
-    -InputFile $appRaw `
-    -OutputFile $appCmd `
-    -Bank BANK0
-if ($LASTEXITCODE -ne 0) { throw "No se pudo crear el ejecutable CMDP de HELLO." }
+foreach ($app in 'hello', 'mem') {
+    $appSource = Join-Path $projectRoot "src\apps\$app.c"
+    $appRaw = Join-Path $buildDir "$app.raw"
+    $appCmd = Join-Path $buildDir "$app.cmd"
+    & $cl65 -t c128 -O -I $buildDir -C $appCfg -o $appRaw $appSource $appCrt0
+    if ($LASTEXITCODE -ne 0) { throw "CC65 no pudo compilar la aplicacion $app." }
+
+    & (Join-Path $projectRoot 'tools\make-cmd-program.ps1') `
+        -InputFile $appRaw -OutputFile $appCmd -Bank BANK0
+}
 
 if (Test-Path $disk) { Remove-Item -LiteralPath $disk -Force }
 $c1541 = Join-Path $viceBin 'c1541.exe'
 & $c1541 -format 'cmd-os,co' d64 $disk `
     -write $program boot `
-    -write $appCmd hello.cmd
+    -write (Join-Path $buildDir 'hello.cmd') hello.cmd `
+    -write (Join-Path $buildDir 'mem.cmd') mem.cmd
 if ($LASTEXITCODE -ne 0) { throw "VICE c1541 no pudo crear la imagen D64." }
 
 & (Join-Path $projectRoot 'tools\make-boot-sector.ps1') -DiskImage $disk -Program $program

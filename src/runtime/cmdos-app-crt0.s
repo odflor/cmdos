@@ -9,7 +9,9 @@
         .import         zerobss
         .import         push0, callmain
         .import         RESTOR, BSOUT, CLRCH
-        .import         __MAIN_START__, __MAIN_SIZE__, __STACKSIZE__
+        .import         __APP_STACK_TOP__, __STACK_START__
+
+        .assert __STACK_START__ >= $B000, lderror, "CMD-OS app stack exceeds its RAM reservation"
 
         .include        "zeropage.inc"
         .include        "c128.inc"
@@ -41,8 +43,8 @@ L1:     lda     c_sp,x
         tsx
         stx     spsave
 
-        lda     #<(__MAIN_START__ + __MAIN_SIZE__ + __STACKSIZE__)
-        ldx     #>(__MAIN_START__ + __MAIN_SIZE__ + __STACKSIZE__)
+        lda     #<__APP_STACK_TOP__
+        ldx     #>__APP_STACK_TOP__
         sta     c_sp
         stx     c_sp+1
 
