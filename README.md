@@ -18,6 +18,22 @@ archivo, Enter con el nombre vacío muestra una lista filtrada por el tipo que
 corresponde. Las flechas y Enter permiten elegir, y Esc cancela. Los archivos por
 lotes y el disco virtual `M:` siguen pendientes.
 
+## Próxima etapa
+
+El formato de referencia pasará a ser D71 para la 1571. CMD-OS arrancará
+directamente desde el dispositivo 8 mediante el mecanismo de autoboot del C128,
+con VDC de 80 columnas y CPU en modo de 2 MHz. El sistema conservará los
+servicios del KERNAL del C128 y dejará disponible la RAM bajo la ROM de BASIC
+7.0. `EXIT` comprobará si hay aplicaciones suspendidas y pedirá confirmación
+si las hay antes de indicar que se puede apagar el equipo manualmente.
+
+`M:` será un volumen privado accesible desde CMD-OS y sus aplicaciones CMDP.
+Usará un REU inicialmente y podrá incorporar NeoRAM Remix. Compartirá espacio
+entre archivos normales y archivos `.swp` para suspender aplicaciones de
+Bank 1. El disco virtual y el menú de sesiones estarán disponibles solo cuando
+se detecte una expansión compatible y se monte el volumen. El menú permitirá
+reanudar una aplicación o volver al intérprete para abrir otra.
+
 Los [lineamientos de CMD-OS](doc/lineamientos-cmd-os.md) reúnen las decisiones de
 diseño, el estado del prototipo y las instrucciones para retomar el trabajo en otra máquina.
 

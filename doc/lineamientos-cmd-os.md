@@ -2,7 +2,26 @@
 
 Documento de continuidad del proyecto. Integra los lineamientos del repositorio con las decisiones de diseño de las conversaciones de trabajo. El intérprete se identifica como **CMD-OS 0.2.0**. Las secciones de arquitectura describen el diseño acordado y los contratos del prototipo se documentan con el código como referencia. El orden de evolución al final es una propuesta.
 
-## Plataforma y arranque
+## Diseño acordado para la próxima etapa
+
+### Arranque autónomo y disco D71
+
+- CMD-OS arrancará en modo nativo desde `build/cmd-os.d71`, la imagen de referencia para una 1571 en el dispositivo 8. El sector de autoboot de la pista 1, sector 0, cargará `BOOT` mediante el KERNAL del C128 y saltará al punto de entrada de CMD-OS. El runtime inicializará las pilas y la BSS sin ejecutar órdenes de BASIC 7.0 ni usar un stub BASIC.
+- La MMU dejará visible la RAM en `$4000–$BFFF`, bajo la ROM de BASIC, y conservará el KERNAL, el editor de pantalla y la E/S del C128. El mapa de enlace determinará el espacio disponible, porque los CMDP y las pilas ya ocupan parte de esa ventana. Se conservarán inicialmente las direcciones de carga de los CMDP.
+- CMD-OS seleccionará el VDC de 80 columnas y activará el modo de 2 MHz mediante `$D030` durante el arranque. Las aplicaciones seguirán regresando al prompt.
+- `EXIT` comprobará si hay sesiones suspendidas antes de indicar que se puede apagar el equipo. Si las hay, indicará cuáles quedaron guardadas de forma persistente y cuáles se perderán al apagar, y pedirá confirmación. Si el usuario cancela, volverá al prompt. Si confirma o si no hay sesiones suspendidas, mostrará «Ya podés apagar el equipo». El apagado será manual.
+- D71 da la capacidad de doble cara de la 1571. La velocidad de transferencia depende de la unidad y del protocolo, así que se medirá por separado la carga de `BOOT` y la lectura desde `RUN` y `EDIT` en las unidades que admitan transferencia rápida. Se verificará el autoboot en VICE con una 1571 y en los equipos que se declaren compatibles.
+
+### Volumen privado M: y sesiones de Bank 1
+
+- `M:` será un volumen privado de CMD-OS. El kernel administrará la expansión y las aplicaciones CMDP usarán sus servicios de archivos. El volumen quedará fuera de la interfaz de dispositivos del KERNAL del C128. El primer controlador será para REU mediante DMA y NeoRAM Remix podrá usar el mismo formato con un controlador de copia paginada. El disco virtual y la suspensión de aplicaciones estarán disponibles solo si se detecta una expansión compatible y se monta el volumen. Sin expansión compatible, `EXIT` podrá realizar la comprobación de apagado sin consultar archivos de intercambio.
+- Los archivos normales y los archivos de intercambio `.swp` compartirán el espacio del volumen. `DIR` podrá mostrar ambos y el gestor de sesiones controlará la creación, restauración y borrado de los `.swp`. CMD-OS validará el formato antes de montar el volumen y requerirá una orden explícita para formatearlo.
+- Si el contenido de la expansión se conserva o se restaura entre apagados, CMD-OS validará los `.swp` y su compatibilidad con la versión del sistema. Si encuentra sesiones recuperables, mostrará un aviso y seguirá hasta el prompt. La restauración se hará cuando el usuario elija una sesión mediante Alt+Help.
+- Alt+Help, pendiente de comprobar en el C128 y en VICE, abrirá el menú desde el intérprete o desde un CMDP de Bank 1 en un punto seguro del servicio de teclado. Desde el intérprete se mostrarán las sesiones suspendidas, incluidas las persistentes recuperables. Desde un CMDP se mostrarán el intérprete y las demás sesiones suspendidas. El contexto activo queda fuera de la lista. Esc cierra el menú y devuelve el control al contexto activo sin guardar ni cargar un `.swp`. El intercambio empieza al elegir otro destino. El estado se guardará antes de reutilizar su memoria. Si falta espacio, se podrá volver a la aplicación activa.
+- Cada sesión guardará las regiones de Bank 1 que usa la aplicación y el contexto para reanudarla. Para la primera prueba con `EDIT`, se propone copiar `$1000–$BFFF` (44 KiB), que incluye código, datos, BSS, pila de C y documento, y preservar la página cero de CC65, la pila del procesador y el mapa de memoria. El `.swp` prescindirá de la memoria VDC. Al reanudarse, `EDIT` invalidará su caché de pantalla y repintará la vista completa con el cursor y el desplazamiento guardados. El intérprete conservará su propia continuación y su unidad activa.
+- En la primera versión, el punto de suspensión requerirá que la aplicación haya cerrado sus canales de disco. Si hay una operación en curso, la suspensión podrá esperar a que termine y se cierren los canales.
+
+## Plataforma y arranque del prototipo actual
 
 - Desarrollar para Commodore 128 en modo nativo, con CC65 (`-t c128`), C para el intérprete y ca65 para el arranque de aplicaciones. La consola usa el VDC de 80 columnas y las rutinas de pantalla, teclado y disco de CC65/KERNAL.
 - El artefacto principal es `build/cmd-os.d64`, montado en el dispositivo 8. `build.ps1` compila y empaqueta los programas y escribe `boot`, `hello.cmd`, `mem.cmd` y `edit.cmd` con `c1541`. `tools/make-boot-sector.ps1` instala el sector de autoboot en pista 1, sector 0. El sector lleva la firma `CBM` y transfiere el control a BASIC con `RUN"BOOT"` mediante la entrada ROM `$AFA5`. Preservar este autoboot y el stub de BASIC de `boot.prg`.
@@ -142,9 +161,9 @@ Adaptar las rutas a la instalación de cada equipo. La comprobación básica usa
 
 ## Orden de evolución propuesto
 
-1. Validar una imagen recién generada en `x128`. Comprobar el autoboot desde el dispositivo 8, `ver`, `dir`, `run hello`, `run mem`, el regreso al prompt, las unidades, el manejo de archivos inválidos y `exit` a BASIC.
+1. Implementar el arranque autónomo desde D71 y validar en `x128` con una 1571 en el dispositivo 8. Comprobar el prompt en VDC a 2 MHz, `ver`, `dir`, `run hello`, `run mem`, la apertura y el guardado de un SEQ con `run edit`, y el regreso al prompt.
 2. Mantener las reservas del intérprete y de las aplicaciones separadas. Probar el puente y el editor también en hardware real.
 3. Adaptar las aplicaciones de Bank 0 a los servicios comunes y acordar una ABI para compartir recursos entre bancos.
 4. Probar el uso de la ventana temporal de Bank 0 para recursos de una aplicación Bank 1 y la reutilización de esa misma ventana por una aplicación Bank 0 después del retorno.
 5. Pasar argumentos y devolver códigos de salida. Validar una secuencia de comandos externos que conserve el estado del intérprete entre ejecuciones.
-6. Definir la capacidad, el formato y el acceso del disco virtual `M:`. Incorporarlo a `DIR` y `RUN` cuando disponga de lectura de directorio y archivos.
+6. Implementar el volumen privado `M:` sobre REU e incorporarlo a `DIR`, `RUN` y los servicios de archivos de CMD-OS. Probar la suspensión y reanudación alternada de dos sesiones de `EDIT` con documentos sin guardar. Agregar el controlador opcional para NeoRAM Remix sobre el mismo formato.
