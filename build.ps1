@@ -1,6 +1,7 @@
 param(
-    [string] $Cc65Bin = 'D:\cc65\bin',
-    [string] $ViceBin = 'D:\GTK3VICE-3.10-win64\bin'
+    [string] $Cc65Bin = 'D:\temp\cc65\bin',
+    [string] $ViceBin = 'D:\temp\GTK3VICE-3.9-win64\bin',
+    [string] $ImageName = 'cmd-os.d71'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,12 +16,15 @@ $appCrt0 = Join-Path $projectRoot 'src\runtime\cmdos-app-crt0.s'
 $appCfg = Join-Path $projectRoot 'cfg\cmdos-app-bank0.cfg'
 $bank1Cfg = Join-Path $projectRoot 'cfg\cmdos-app-bank1.cfg'
 $bank1Crt0 = Join-Path $projectRoot 'src\runtime\cmdos-bank1-crt0.s'
-$disk = Join-Path $buildDir 'cmd-os.d64'
+if ($ImageName -notmatch '^[\w-]+\.d71$') { throw 'Indica un nombre de imagen D71.' }
+$disk = Join-Path $buildDir $ImageName
+$bootSector = Join-Path $buildDir 'boot-sector.bin'
 
 New-Item -ItemType Directory -Force $buildDir | Out-Null
 
 $cl65 = Join-Path $Cc65Bin 'cl65.exe'
-& $cl65 -t c128 -O -m $map -o $program $source `
+& $cl65 -t c128 -O -C (Join-Path $projectRoot 'cfg\cmdos.cfg') -m $map -o $program `
+    (Join-Path $projectRoot 'src\runtime\cmdos-crt0.s') $source `
     (Join-Path $projectRoot 'src\kernel\tui.c') `
     (Join-Path $projectRoot 'src\kernel\bank1-gate.s')
 if ($LASTEXITCODE -ne 0) { throw "CC65 no pudo compilar CMD-OS." }
@@ -70,17 +74,21 @@ if ($LASTEXITCODE -ne 0) { throw 'CC65 no pudo compilar EDIT.' }
 & (Join-Path $projectRoot 'tools\make-cmd-program.ps1') `
     -InputFile $editRaw -OutputFile $editCmd -Bank BANK1 -LoadAddress 0x1000 -ApiVersion 2
 
+& $cl65 -t c128 -C (Join-Path $projectRoot 'cfg\cmdos-boot-sector.cfg') -o $bootSector `
+    (Join-Path $projectRoot 'src\runtime\cmdos-boot-sector.s')
+if ($LASTEXITCODE -ne 0) { throw 'CC65 no pudo compilar el sector de autoboot.' }
+
 if (Test-Path $disk) { Remove-Item -LiteralPath $disk -Force }
 $c1541 = Join-Path $viceBin 'c1541.exe'
-& $c1541 -format 'cmd-os,co' d64 $disk `
+& $c1541 -format 'cmd-os,co' d71 $disk `
     -write $program boot `
     -write (Join-Path $buildDir 'hello.cmd') hello.cmd `
     -write (Join-Path $buildDir 'mem.cmd') mem.cmd `
     -write $editCmd edit.cmd
-if ($LASTEXITCODE -ne 0) { throw "VICE c1541 no pudo crear la imagen D64." }
+if ($LASTEXITCODE -ne 0) { throw "VICE c1541 no pudo crear la imagen D71." }
 
-& (Join-Path $projectRoot 'tools\make-boot-sector.ps1') -DiskImage $disk -Program $program
+& (Join-Path $projectRoot 'tools\make-boot-sector.ps1') -DiskImage $disk -BootSector $bootSector
 if ($LASTEXITCODE -ne 0) { throw "No se pudo instalar el sector de autoboot C128." }
 
 Write-Host "Imagen creada: $disk"
-Write-Host "Arranque de VICE: $viceBin\x128.exe -8 $disk"
+Write-Host "Arranque de VICE: $viceBin\x128.exe -drive8type 1571 -8 $disk"

@@ -2,13 +2,14 @@
 #include <cbm.h>
 #include <conio.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include "kernel/tui.h"
 
 #define CMDLINE_SIZE 80
 #define DIR_LFN      2
 #define PROGRAM_LFN  3
+#define VIC_CONTROL_1 (*(volatile unsigned char*)0xD011)
+#define VIC_CLOCK     (*(volatile unsigned char*)0xD030)
 
 #define CMDP_HEADER_SIZE 16
 #define CMDP_FLAG_BANK0  0x01
@@ -169,10 +170,26 @@ static unsigned char read_disk_header(void)
     return 0;
 }
 
+static void print_block_size(unsigned long blocks)
+{
+    /* 254 bytes of file data per block. Split blocks * 127 / 512
+       so the intermediate products fit in a 16-bit unsigned int. */
+    unsigned int remainder = ((unsigned int)blocks & 511) * 127;
+    unsigned long whole = (blocks >> 9) * 127 + (remainder >> 9);
+    unsigned int fraction = ((remainder & 511) * 100 + 256) >> 9;
+
+    if (fraction == 100) {
+        ++whole;
+        fraction = 0;
+    }
+    cprintf(" (%lu.%02u KiB)", whole, fraction);
+}
+
 static void show_directory(void)
 {
     struct cbm_dirent entry;
     unsigned char result;
+    unsigned long used_blocks = 0;
 
     cprintf("\r\nDIRECTORY %c: (dispositivo %u)\r\n", drive_letter(), current_drive);
     cbm_k_clall();
@@ -194,13 +211,20 @@ static void show_directory(void)
         if (entry.type == CBM_T_HEADER) {
             continue;
         } else {
-            cprintf("%5u \"", entry.size);
+            used_blocks += entry.size;
+            cprintf("%5u", entry.size);
+            print_block_size(entry.size);
+            cputs(" \"");
             print_name(entry.name);
             cprintf("\" %s\r\n", file_type(entry.type));
         }
     }
     if (result == 2) {
-        cprintf("\r\n%u bloques libres\r\n", entry.size);
+        cprintf("\r\n%lu bloques utilizados", used_blocks);
+        print_block_size(used_blocks);
+        cprintf("\r\n%u bloques libres", entry.size);
+        print_block_size(entry.size);
+        cputs("\r\n");
     } else if (result != 0) {
         cputs("ERROR: no se pudo leer completamente el directorio.\r\n");
     }
@@ -221,7 +245,7 @@ static void show_help(void)
     cputs("M: selecciona el futuro disco virtual en memoria.\r\n");
     cputs("HELP muestra esta ayuda.\r\n");
     cputs("VER muestra la version de CMD-OS.\r\n");
-    cputs("EXIT regresa al BASIC 7.0.\r\n");
+    cputs("EXIT prepara el equipo para el apagado.\r\n");
 }
 
 static unsigned char has_extension(const char* name)
@@ -336,7 +360,6 @@ static unsigned char run_program(const char* requested)
         tui_editor_keys(0);
         bank1_finish();
         tui_reset();
-        cputs("Aplicacion de banco 1 finalizada.\r\n");
         return 0;
     }
 
@@ -347,10 +370,8 @@ static unsigned char run_program(const char* requested)
         return 1;
     }
 
-    cprintf("Ejecutando %s en banco 0...\r\n", name);
     entry = (void (*)(void))(load_address + entry_offset);
     entry();
-    cputs("Aplicacion finalizada; regresando al interprete.\r\n");
     return 0;
 }
 
@@ -408,6 +429,9 @@ void main(void)
     char command_upper[CMDLINE_SIZE];
 
     videomode(VIDEOMODE_80COL);
+    /* Blank the VIC-II display explicitly, including during slow IEC cycles. */
+    VIC_CONTROL_1 &= 0x6F;
+    VIC_CLOCK |= 1;
     tui_reset();
     cputs("CMD-OS bootloader\r\n");
     cputs("Inicializando sistema nativo C128...\r\n");
@@ -443,8 +467,10 @@ void main(void)
         } else if (strcmp(command_upper, "VER") == 0) {
             cputs("CMD-OS 0.2.0 - kernel comun y aplicaciones CMDP\r\n");
         } else if (strcmp(command_upper, "EXIT") == 0) {
-            cputs("Regresando a BASIC 7.0...\r\n");
-            exit(EXIT_SUCCESS);
+            cputs("Ya podes apagar el equipo.\r\n");
+            for (;;) {
+                cgetc();
+            }
         } else if (strcmp(command_upper, "A:") == 0) {
             select_drive(8);
         } else if (strcmp(command_upper, "B:") == 0) {

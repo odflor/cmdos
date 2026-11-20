@@ -1,8 +1,14 @@
 @echo off
 setlocal
 
-rem Iniciar Commodore 128, activar la pantalla VDC de 80 columnas
-rem y montar la imagen existente del CMD-OS como unidad 8.
-"D:\GTK3VICE-3.10-win64\bin\x128.exe" -80col -8 "D:\c128fuentes\build\cmd-os.d64" -9 "d:\Downloads\commodore_stuff\c128\c128_tutorial_disk.d64"
+rem Montar CMD-OS en una 1571 como unidad 8.
+set "vice=D:\temp\GTK3VICE-3.9-win64\bin\x128.exe"
+set "disk=%~dp0build\cmd-os.d71"
+set "tutorial=D:\Downloads\commodore_stuff\c128\c128_tutorial_disk.d64"
+if exist "%tutorial%" (
+    "%vice%" -drive8type 1571 -8 "%disk%" -9 "%tutorial%"
+) else (
+    "%vice%" -drive8type 1571 -8 "%disk%"
+)
 
 endlocal

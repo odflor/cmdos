@@ -7,8 +7,15 @@ struct segment {
     unsigned char is_free;
 };
 
-static const struct segment segments[] = {
+static const struct segment bank0[] = {
 #include "cmdos-memory.inc"
+};
+
+static const struct segment bank1[] = {
+    { "RAM comun durante la ejecucion", 0x0000, 0x0FFF, 0 },
+    { "Area CMDP (codigo, datos y BSS)", 0x1000, 0x33FF, 0 },
+    { "Pila C CMDP (reserva)", 0x3400, 0x37FF, 0 },
+    { "Libre para datos (bufer de EDIT)", 0x3800, 0xBFFF, 1 }
 };
 
 static void put_address(unsigned int address)
@@ -43,15 +50,16 @@ static void put_size(unsigned int bytes)
     cputs(text);
 }
 
-void main(void)
+static void show_bank(const char* title, const struct segment* segments,
+                      unsigned char count)
 {
     unsigned char index;
     unsigned int assigned = 0;
     unsigned int free = 0;
 
-    cputs("\r\nCMD-OS: mapa de memoria del banco 0\r\n");
+    cputs(title);
     cputs("Inicio   Fin       KiB     Segmento (fin inclusivo)\r\n");
-    for (index = 0; index < sizeof(segments) / sizeof(segments[0]); ++index) {
+    for (index = 0; index < count; ++index) {
         unsigned int bytes = segments[index].end - segments[index].start + 1;
 
         if (segments[index].is_free) {
@@ -70,8 +78,15 @@ void main(void)
     }
     cputs("Total asignado: ");
     put_size(assigned);
-    cputs(" KiB\r\n");
-    cputs("RAM libre sin asignar: ");
+    cputs(" KiB  RAM libre sin asignar: ");
     put_size(free);
     cputs(" KiB\r\n");
+}
+
+void main(void)
+{
+    show_bank("\r\nCMD-OS: mapa de memoria del banco 0\r\n",
+              bank0, sizeof(bank0) / sizeof(bank0[0]));
+    show_bank("CMD-OS: mapa de memoria del banco 1\r\n",
+              bank1, sizeof(bank1) / sizeof(bank1[0]));
 }

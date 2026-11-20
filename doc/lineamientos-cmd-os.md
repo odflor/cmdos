@@ -4,15 +4,13 @@ Documento de continuidad del proyecto. Integra los lineamientos del repositorio 
 
 ## Diseño acordado para la próxima etapa
 
-### Arranque autónomo y disco D71
+### Pruebas pendientes de la 1571
 
-- CMD-OS arrancará en modo nativo desde `build/cmd-os.d71`, la imagen de referencia para una 1571 en el dispositivo 8. El sector de autoboot de la pista 1, sector 0, cargará `BOOT` mediante el KERNAL del C128 y saltará al punto de entrada de CMD-OS. El runtime inicializará las pilas y la BSS sin ejecutar órdenes de BASIC 7.0 ni usar un stub BASIC.
-- La MMU dejará visible la RAM en `$4000–$BFFF`, bajo la ROM de BASIC, y conservará el KERNAL, el editor de pantalla y la E/S del C128. El mapa de enlace determinará el espacio disponible, porque los CMDP y las pilas ya ocupan parte de esa ventana. Se conservarán inicialmente las direcciones de carga de los CMDP.
-- CMD-OS seleccionará el VDC de 80 columnas y activará el modo de 2 MHz mediante `$D030` durante el arranque. Las aplicaciones seguirán regresando al prompt.
-- `EXIT` comprobará si hay sesiones suspendidas antes de indicar que se puede apagar el equipo. Si las hay, indicará cuáles quedaron guardadas de forma persistente y cuáles se perderán al apagar, y pedirá confirmación. Si el usuario cancela, volverá al prompt. Si confirma o si no hay sesiones suspendidas, mostrará «Ya podés apagar el equipo». El apagado será manual.
-- D71 da la capacidad de doble cara de la 1571. La velocidad de transferencia depende de la unidad y del protocolo, así que se medirá por separado la carga de `BOOT` y la lectura desde `RUN` y `EDIT` en las unidades que admitan transferencia rápida. Se verificará el autoboot en VICE con una 1571 y en los equipos que se declaren compatibles.
+Medir por separado la carga de BOOT y la lectura desde RUN y EDIT en unidades que admitan transferencia rápida.
 
 ### Volumen privado M: y sesiones de Bank 1
+
+- Cuando se implemente el swap, EXIT indicará qué sesiones se podrán recuperar y cuáles se perderán al apagar. Si quedan sesiones suspendidas, pedirá confirmación. Esc devuelve el control al prompt.
 
 - `M:` será un volumen privado de CMD-OS. El kernel administrará la expansión y las aplicaciones CMDP usarán sus servicios de archivos. El volumen quedará fuera de la interfaz de dispositivos del KERNAL del C128. El primer controlador será para REU mediante DMA y NeoRAM Remix podrá usar el mismo formato con un controlador de copia paginada. El disco virtual y la suspensión de aplicaciones estarán disponibles solo si se detecta una expansión compatible y se monta el volumen. Sin expansión compatible, `EXIT` podrá realizar la comprobación de apagado sin consultar archivos de intercambio.
 - Los archivos normales y los archivos de intercambio `.swp` compartirán el espacio del volumen. `DIR` podrá mostrar ambos y el gestor de sesiones controlará la creación, restauración y borrado de los `.swp`. CMD-OS validará el formato antes de montar el volumen y requerirá una orden explícita para formatearlo.
@@ -24,7 +22,8 @@ Documento de continuidad del proyecto. Integra los lineamientos del repositorio 
 ## Plataforma y arranque del prototipo actual
 
 - Desarrollar para Commodore 128 en modo nativo, con CC65 (`-t c128`), C para el intérprete y ca65 para el arranque de aplicaciones. La consola usa el VDC de 80 columnas y las rutinas de pantalla, teclado y disco de CC65/KERNAL.
-- El artefacto principal es `build/cmd-os.d64`, montado en el dispositivo 8. `build.ps1` compila y empaqueta los programas y escribe `boot`, `hello.cmd`, `mem.cmd` y `edit.cmd` con `c1541`. `tools/make-boot-sector.ps1` instala el sector de autoboot en pista 1, sector 0. El sector lleva la firma `CBM` y transfiere el control a BASIC con `RUN"BOOT"` mediante la entrada ROM `$AFA5`. Preservar este autoboot y el stub de BASIC de `boot.prg`.
+- El artefacto principal es `build/cmd-os.d71` para la 1571 del dispositivo 8. `build.ps1` empaqueta `boot`, `hello.cmd`, `mem.cmd` y `edit.cmd` con `c1541`. `tools/make-boot-sector.ps1` instala y reserva la pista 1, sector 0. El sector carga `BOOT` mediante el KERNAL y salta a `$1C01`. El runtime inicializa las pilas y la BSS sin pasar por BASIC 7.0.
+- La MMU deja visible la RAM en `$4000–$BFFF` y conserva el KERNAL, el editor de pantalla y la E/S. CMD-OS selecciona el VDC de 80 columnas, desactiva la salida de 40 columnas y activa el modo de 2 MHz.
 - `run-vice.ps1` monta la imagen con `x128`. Los scripts apuntan a rutas de CC65 y VICE en `D:`. `boot.cmd` es otro lanzador de VICE con rutas absolutas y un disco adicional en el dispositivo 9.
 
 ## Consola y discos
@@ -32,11 +31,11 @@ Documento de continuidad del proyecto. Integra los lineamientos del repositorio 
 | Entrada | Contrato actual |
 | --- | --- |
 | `A:`, `B:`, `C:`, `D:` | Seleccionan los dispositivos IEC 8, 9, 10 y 11. La consola inicia en `CMD-OS A:>`. |
-| `DIR` | Lee la unidad activa y muestra cabecera, archivos, tipos, tamaños y bloques libres. |
+| `DIR` | Muestra cabecera, archivos, tipos y tamaños. Cada archivo, el total utilizado y el espacio libre se expresan en bloques y KiB, a razón de 254 bytes útiles por bloque. |
 | `RUN nombre[.cmd]` | Abre el archivo en la unidad activa y agrega `.cmd` si el nombre carece de punto. El argumento conserva sus caracteres originales. |
 | `nombre[.cmd]` | Si no es un comando interno, busca una coincidencia exacta con el nombre de un archivo `.cmd` en la unidad activa y utiliza el mismo cargador que `RUN`. |
 | `HELP`, `VER` | Muestran los comandos y la versión. |
-| `EXIT` | Devuelve el control a BASIC 7.0. |
+| `EXIT` | Muestra «Ya podés apagar el equipo» y espera el apagado manual. |
 | `M:` | Informa que la unidad está reservada para un futuro disco virtual. |
 
 La comparación de comandos ignora diferencias entre las letras ASCII minúsculas y mayúsculas. Mantener el flujo de vuelta al prompt tras cada operación, incluidos los errores de disco o formato. Conservar el tratamiento PETSCII al imprimir nombres del disco y `\r\n` en las salidas de la consola.
@@ -89,7 +88,7 @@ El runtime de la aplicación (`src/runtime/cmdos-app-crt0.s`) selecciona el mapa
 | Rango | Uso o reserva actual |
 | --- | --- |
 | `$0002–$001B` | Reserva del enlazador para la página cero de CC65. El runtime guarda y restaura los bytes de trabajo de CC65. |
-| `$1C01–$3D67` | Desde el stub BASIC hasta el final de la BSS del intérprete en la compilación revisada. La dirección final depende del build. |
+| `$1C01–$4F24` | Desde la entrada nativa hasta el final de la BSS en la compilación revisada. La dirección final depende del build. |
 | Fin de CMD-OS hasta `$4FFF` | Margen para el crecimiento del kernel y del intérprete. |
 | `$5000–$AFFF` | Área de enlace de aplicaciones de 24 KiB para código, datos y reservas en RAM, incluidas INIT y BSS. |
 | `$B000–$B7FF` | Reserva para la pila de C de la aplicación, que crece hacia abajo desde `$B800`. |
@@ -122,7 +121,7 @@ El enlazador reserva por defecto `$0800` bytes para la pila de C bajo `$B800`. L
 
 - `lib/` contiene demostraciones independientes en C y sus `.prg` de VDC. `lorem128` y `vdc_real_40_columns` ensayan 40 columnas con el VDC. `spotlight128` desplaza una vista de 40 columnas. `vdc_blink`, `vdc_blink2` y `vdc_random_art` trabajan con atributos y VRAM. `mandala128` genera patrones de texto. Los `.bat` disponibles compilan ejemplos individuales.
 - [`lib/example.c`](../lib/example.c) es una demostración en C de la consola VDC de 80 columnas. Se puede compilar por separado con `cl65 -t c128 -O -o example-vdc.prg lib/example.c`.
-- [`doc/programa.prg`](programa.prg) y [`doc/KeystoneKapers.prg`](KeystoneKapers.prg) son binarios conservados como material de referencia. Ambos se trasladaron desde la raíz con su contenido intacto. El build de CMD-OS trabaja con los fuentes de `src/`, y estos binarios quedan fuera de la imagen D64.
+- [`doc/programa.prg`](programa.prg) y [`doc/KeystoneKapers.prg`](KeystoneKapers.prg) son binarios conservados como material de referencia. Ambos se trasladaron desde la raíz con su contenido intacto. El build de CMD-OS trabaja con los fuentes de `src/`, y estos binarios quedan fuera de la imagen D71.
 - `crazy-lander/` trae su propio fuente, documentación, compilador por lote y `.prg` para VIC-II. Se compila por separado.
 - `doc/c128 bootsect.7z` contiene `bootsect.128`, de 256 bytes. El proceso de compilación genera su propio sector.
 - `LICENSE` contiene la licencia MIT del repositorio. `.gitignore` excluye `build/` y los `.o`. Los scripts de Git trabajan sobre `main`. `bajar-cambios.ps1` usa `pull --rebase`; `subir-cambios.ps1` agrega todo el árbol antes de crear un commit y hacer push.
@@ -142,6 +141,8 @@ El enlazador reserva por defecto `$0800` bytes para la pila de C bajo `$B800`. L
 11. El intérprete conserva `RUN` y permite iniciar un CMDP escribiendo solo su nombre, con o sin `.cmd`. Los comandos internos tienen prioridad.
 12. Se incorporó un selector de archivos reutilizable en el kernel. El editor lista los SEQ de la unidad activa cuando se presiona Enter con el nombre vacío. Se adoptó esta regla para los futuros diálogos de archivo de CMD-OS y se actualizó el resumen ejecutivo del README.
 
+13. Se verificaron en VICE el autoboot D71 con una 1571, el prompt en VDC a 2 MHz, la carga de HELLO, MEM y EDIT y el aviso de apagado de EXIT. MEM informa ambos bancos con los dos totales en una fila por banco. DIR muestra los KiB por archivo y los totales utilizado y libre. El intérprete omite los avisos de ejecución y finalización al lanzar un CMDP.
+
 ## Retomar el proyecto en otra máquina
 
 Actualizar este documento y `README.md` únicamente cuando el usuario solicite explícitamente la actualización del archivo correspondiente. Las novedades de varias sesiones se pueden documentar juntas. Cuando se solicite actualizar los lineamientos, registrar las decisiones, el estado comprobado y el siguiente paso.
@@ -150,18 +151,18 @@ Usar este documento versionado para trasladar el contexto entre máquinas. En la
 
 > Lee `doc/lineamientos-cmd-os.md` y usa su historial como contexto. Revisa el estado del repositorio y retomemos CMD-OS desde allí.
 
-La imagen D64 y los demás resultados compilados se regeneran con `build.ps1`, porque `build/` está excluido de Git. En la máquina donde se hicieron estas pruebas se usó:
+La imagen D71 y los demás resultados compilados se regeneran con `build.ps1`, porque `build/` está excluido de Git. Con las rutas predeterminadas de la máquina actual se usa:
 
 ```powershell
-.\build.ps1 -Cc65Bin C:\cc65\bin -ViceBin C:\GTK3VICE-3.7-win32\bin
-& 'C:\GTK3VICE-3.7-win32\bin\x128.exe' -80col -8 .\build\cmd-os.d64
+.\build.ps1
+.\run-vice.ps1
 ```
 
 Adaptar las rutas a la instalación de cada equipo. La comprobación básica usa `dir`, `run hello`, `run mem` y `run edit`. Escribir en minúsculas los nombres de los archivos tal como figuran en el disco. Quedan pendientes el préstamo de recursos, los argumentos y códigos de salida de aplicaciones, los archivos por lotes y el disco virtual `M:`.
 
 ## Orden de evolución propuesto
 
-1. Implementar el arranque autónomo desde D71 y validar en `x128` con una 1571 en el dispositivo 8. Comprobar el prompt en VDC a 2 MHz, `ver`, `dir`, `run hello`, `run mem`, la apertura y el guardado de un SEQ con `run edit`, y el regreso al prompt.
+1. Completar la validación del arranque autónomo desde D71 en hardware real y verificar la apertura y el guardado de archivos SEQ con `EDIT` en la imagen nueva.
 2. Mantener las reservas del intérprete y de las aplicaciones separadas. Probar el puente y el editor también en hardware real.
 3. Adaptar las aplicaciones de Bank 0 a los servicios comunes y acordar una ABI para compartir recursos entre bancos.
 4. Probar el uso de la ventana temporal de Bank 0 para recursos de una aplicación Bank 1 y la reutilización de esa misma ventana por una aplicación Bank 0 después del retorno.
