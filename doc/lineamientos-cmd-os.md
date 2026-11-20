@@ -125,7 +125,9 @@ El enlazador reserva por defecto `$0800` bytes para la pila de C bajo `$B800`. L
 
 ## Retomar el proyecto en otra máquina
 
-Usar este documento versionado para trasladar el contexto entre máquinas. Al cerrar una sesión, actualizar aquí las decisiones, el estado comprobado y el siguiente paso. Revisar los cambios, incluir el documento en un commit y publicar la rama en GitHub. En la otra máquina, clonar el repositorio o actualizar la copia existente con `git pull --ff-only origin main` desde `main`. Abrir esa carpeta en Codex y empezar con este mensaje:
+Actualizar este documento y `README.md` únicamente cuando el usuario solicite explícitamente la actualización del archivo correspondiente. Las novedades de varias sesiones se pueden documentar juntas. Cuando se solicite actualizar los lineamientos, registrar las decisiones, el estado comprobado y el siguiente paso.
+
+Usar este documento versionado para trasladar el contexto entre máquinas. En la otra máquina, clonar el repositorio o actualizar la copia existente con `git pull --ff-only origin main` desde `main`. Abrir esa carpeta en Codex y empezar con este mensaje:
 
 > Lee `doc/lineamientos-cmd-os.md` y usa su historial como contexto. Revisa el estado del repositorio y retomemos CMD-OS desde allí.
 
