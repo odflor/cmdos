@@ -1,7 +1,7 @@
 #include <conio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../kernel/tui.h"
+#include "../kernel/cmdosk-abi.h"
 
 #define DOCUMENT ((unsigned char*)0x3800)
 #define CAPACITY 0x8800u
@@ -463,61 +463,27 @@ static void save_document(unsigned char save_as)
     status = result > 1 ? "Guardado; queda cmdos-edit.bak" : "Archivo guardado";
 }
 
-static void hide_menu(void)
-{
-    unsigned char row;
-
-    for (row = 1; row <= FILE_MENU_ITEMS + 2; ++row) {
-        draw(0, row, 32, TUI_TEXT, "");
-        screen[row][CACHE_VALID] = 0;
-    }
-}
-
 static unsigned char menu(void)
 {
-    static const char* const labels[] = {
-        "Nuevo", "Abrir           F1", "Guardar         F3", "Guardar como    F5", "Salir",
-        "Inicio          F2", "Fin             F4", "Borrar caracter"
+    static const unsigned char definition[] =
+        "\x02"
+        "\x00\x05" "Nuevo\0Abrir           F1\0Guardar         F3\0"
+                   "Guardar como    F5\0Salir\0"
+        "\x0a\x03" "Inicio          F2\0Fin             F4\0Borrar caracter";
+    static const unsigned char actions[] = {
+        0, MENU_NEW, CH_F1, CH_F3, CH_F5, MENU_EXIT, CH_F2, CH_F4, CH_DEL
     };
-    static const unsigned char shortcuts[] = {
-        MENU_NEW, CH_F1, CH_F3, CH_F5, MENU_EXIT, CH_F2, CH_F4, CH_DEL
-    };
-    unsigned char group = 0, selected = 0, value, x, count, i;
+    unsigned char row;
 
-    for (;;) {
-        x = group ? 10 : 0;
-        count = group ? 3 : FILE_MENU_ITEMS;
-        TUI_REQUEST.x = x;
-        TUI_REQUEST.y = 1;
-        TUI_REQUEST.count = 22;
-        TUI_REQUEST.style = TUI_POPUP;
-        TUI_REQUEST.data[0] = count + 2;
-        call(TUI_BOX);
-        for (i = 0; i < count; ++i) {
-            draw(x + 1, i + 2, 20, i == selected ? TUI_POPUP | REVERSE : TUI_POPUP,
-                 labels[i + (group ? FILE_MENU_ITEMS : 0)]);
-        }
-        value = key();
-        if (value == CH_ENTER || value == 10) {
-            value = shortcuts[selected + (group ? FILE_MENU_ITEMS : 0)];
-            break;
-        }
-        if (value == ESCAPE || value == CH_F7) {
-            value = 0;
-            break;
-        }
-        if (value == CH_CURS_LEFT || value == CH_CURS_RIGHT) {
-            hide_menu();
-            group ^= 1;
-            selected = 0;
-        } else if (value == CH_CURS_UP) {
-            selected = selected ? selected - 1 : count - 1;
-        } else if (value == CH_CURS_DOWN && ++selected == count) {
-            selected = 0;
-        }
+    TUI_REQUEST.y = 1;
+    TUI_REQUEST.style = 22;
+    TUI_REQUEST.count = sizeof(definition);
+    memcpy(TUI_REQUEST.data, definition, sizeof(definition));
+    call(TUI_MENU);
+    for (row = 1; row <= FILE_MENU_ITEMS + 2; ++row) {
+        screen[row][CACHE_VALID] = 0;
     }
-    hide_menu();
-    return value;
+    return TUI_REQUEST.result < sizeof(actions) ? actions[TUI_REQUEST.result] : 0;
 }
 
 int main(void)
@@ -527,8 +493,14 @@ int main(void)
     call(TUI_CLEAR);
     for (;;) {
         render();
-        value = key();
+        call(TUI_SESSION_KEY);
+        value = TUI_REQUEST.result;
         fast_edit = 0;
+        if (value == TUI_SESSION_RESUMED) {
+            memset(screen, 0, sizeof(screen));
+            call(TUI_CLEAR);
+            continue;
+        }
         if (value == CH_F7) {
             value = menu();
             if (value == MENU_NEW) {

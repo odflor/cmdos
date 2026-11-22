@@ -83,7 +83,7 @@ static void show_bank(const char* title, const struct segment* segments,
     cputs(" KiB\r\n");
 }
 
-#include "../kernel/tui.h"
+#include "../kernel/cmdosk-abi.h"
 
 int main(void)
 {

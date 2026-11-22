@@ -1,5 +1,5 @@
 #include <conio.h>
-#include "../kernel/tui.h"
+#include "../kernel/cmdosk-abi.h"
 
 /* First external CMD-OS application prototype. */
 int main(void)

@@ -1,5 +1,5 @@
-#ifndef CMDOS_TUI_H
-#define CMDOS_TUI_H
+#ifndef CMDOSK_ABI_H
+#define CMDOSK_ABI_H
 
 #include <c128.h>
 
@@ -21,8 +21,24 @@ enum tui_operation {
     TUI_CLEAR, TUI_DRAW, TUI_KEY, TUI_READ_OPEN, TUI_WRITE_OPEN,
     TUI_READ, TUI_WRITE, TUI_CLOSE, TUI_CURSOR, TUI_DIALOG,
     TUI_BOX, TUI_DISK_COMMAND, TUI_PICK_FILE, TUI_ARGUMENTS, TUI_REU,
-    TUI_DISK_API
+    TUI_DISK_API, TUI_MENU, TUI_COPY, TUI_SESSION_KEY
 };
+#define TUI_SESSION_RESUMED 1
+
+/* TUI_COPY: x and y are source and destination devices (0 means M:).
+ * data holds two NUL-terminated names at offsets 0 and 17. */
+#define TUI_COPY_DESTINATION 17
+enum tui_copy_result {
+    TUI_COPY_OK = 0, TUI_COPY_INVALID, TUI_COPY_UNMOUNTED, TUI_COPY_SOURCE,
+    TUI_COPY_TYPE, TUI_COPY_DEST, TUI_COPY_IO, TUI_COPY_PARTIAL,
+    TUI_COPY_UNSUPPORTED = 255
+};
+
+/* TUI_MENU: y is top row, style is outer width, count is payload size.
+ * Payload: group count, then for each group x, item count, and a
+ * NUL-terminated PETSCII label per item. Result is the 1-based item
+ * index across all groups, or zero on cancel or invalid input.
+ * The kernel clears the menu footprint on exit. The caller repaints it. */
 extern unsigned char reu_detected;
 extern unsigned char mounted;
 
@@ -30,8 +46,8 @@ extern unsigned char mounted;
 extern const char* cmdp_arguments;
 
 void tui_reset(void);
-void tui_dispatch(void);
-unsigned char tui_disk_command(unsigned char device, const char* command);
+void cmdosk_dispatch(void);
+unsigned char cmdosk_disk_command(unsigned char device, const char* command);
 void tui_editor_keys(unsigned char enable);
 #define TUI_COMMON_SAVE_SIZE 0x1F7
 void bank1_prepare(unsigned char device);

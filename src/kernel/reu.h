@@ -12,5 +12,7 @@ void __fastcall__ reu_write_entry(unsigned char slot);
 void __fastcall__ reu_transfer(unsigned char command);
 unsigned char reu_find(const char* name);
 unsigned int reu_read(void* buffer, unsigned int size);
+void cmdosk_reu_publish(unsigned char slot, const char* name,
+                       unsigned int size, unsigned char type);
 
 #endif

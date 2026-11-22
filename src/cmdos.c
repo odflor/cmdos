@@ -1,9 +1,12 @@
 #include <c128.h>
 #include <cbm.h>
 #include <conio.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-#include "kernel/tui.h"
+#include "kernel/cmdosk-abi.h"
+#include "kernel/cmdosk-swap.h"
+#include "kernel/cmdosk-context.h"
 
 #define CMDLINE_SIZE 80
 #define DIR_LFN      2
@@ -97,6 +100,7 @@ static void print_name(const char* name)
 static const char* file_type(unsigned char type)
 {
     switch (type) {
+        case CMDOSK_SWAP_TYPE: return "SWP";
         case CBM_T_PRG: return "PRG";
         case CBM_T_SEQ: return "SEQ";
         case CBM_T_USR: return "USR";
@@ -124,7 +128,7 @@ static unsigned char read_disk_header(void)
 
     if (cbm_open(DIR_LFN, current_drive, CBM_READ, "$")) return 5;
     if (cbm_k_chkin(DIR_LFN)) {
-        cbm_k_clall();
+        cbm_k_close(DIR_LFN);
         return 5;
     }
     /* The drive sends a BASIC directory stream, including its binary prefix. */
@@ -134,7 +138,7 @@ static unsigned char read_disk_header(void)
     } while (byte != '"' && !cbm_k_readst());
     if (byte != '"') {
         cbm_k_clrch();
-        cbm_k_clall();
+        cbm_k_close(DIR_LFN);
         return 3;
     }
     cbm_k_bsout(0x12);
@@ -144,7 +148,7 @@ static unsigned char read_disk_header(void)
     } while (byte && !cbm_k_readst());
     cbm_k_bsout(0x92);
     cbm_k_clrch();
-    cbm_k_clall();
+    cbm_k_close(DIR_LFN);
     cputs("\r\n\r\n");
     return 0;
 }
@@ -223,11 +227,6 @@ static void show_directory(void)
     cbm_k_clall();
 }
 
-static void show_help(void)
-{
-    cputs("DIR RUN COPY DEL A:-D: M: FORMAT M: HELP STATUS VER EXIT\r\n");
-}
-
 #include "kernel/filename.h"
 
 static unsigned char make_program_name(const char* requested, char* name)
@@ -285,6 +284,12 @@ unsigned int reu_read(void* buffer, unsigned int size)
 static int read_program(void* buffer, unsigned int size)
 {
     return current_drive ? cbm_read(PROGRAM_LFN, buffer, size) : reu_read(buffer, size);
+}
+
+static void close_program(void)
+{
+    /* The IEC device must receive CLOSE before control passes to the CMDP. */
+    if (current_drive) cbm_close(PROGRAM_LFN);
 }
 
 static int run_program(const char* requested)
@@ -353,7 +358,7 @@ static int run_program(const char* requested)
                 chunk = TUI_TRANSFER;
             }
             if (read_program(TUI_REQUEST.data, chunk) != (int)chunk) {
-                cbm_k_clall();
+                close_program();
                 bank1_finish();
                 cputs("Carga incompleta.\r\n");
                 return 1;
@@ -362,7 +367,7 @@ static int run_program(const char* requested)
             bank1_store(load_address + copied);
             copied += chunk;
         }
-        cbm_k_clall();
+        close_program();
         tui_editor_keys(1);
         exit_code = bank1_run(load_address + entry_offset);
         tui_editor_keys(0);
@@ -372,7 +377,7 @@ static int run_program(const char* requested)
     }
 
     result = read_program((void*)load_address, payload_size);
-    cbm_k_clall();
+    close_program();
     if (result != (int)payload_size) {
         cputs("Carga incompleta.\r\n");
         return 1;
@@ -388,7 +393,7 @@ static int run_program(const char* requested)
     return entry();
 
 invalid_cmdp:
-    cbm_k_clall();
+    close_program();
     cputs("CMDP invalido.\r\n");
     return 1;
 }
@@ -440,6 +445,62 @@ static void prompt(void)
     cputs("> ");
 }
 
+void cmdosk_bind_help(void);
+
+static void read_command(void)
+{
+    unsigned char length = 0, key, x, y;
+
+    cursor(1);
+    for (;;) {
+        key = cgetc();
+        if (cmdosk_session_hotkey(key)) {
+            cputs("\r\n");
+            cmdosk_session_menu();
+            length = 0;
+            break;
+        }
+        if (key == 0x84) {
+            strcpy(command_line, "HELP");
+            length = 4;
+            break;
+        }
+        if (key == CH_ENTER || key == 10) break;
+        if (key == CH_DEL || key == '\b') {
+            if (!length) continue;
+            --length;
+            x = wherex();
+            y = wherey();
+            if (x) --x;
+            else {
+                x = TUI_WIDTH - 1;
+                --y;
+            }
+            gotoxy(x, y);
+            cputc(' ');
+            gotoxy(x, y);
+        } else if (length < CMDLINE_SIZE - 1 && isprint(key)) {
+            command_line[length++] = key;
+            cputc(key);
+        }
+    }
+    command_line[length] = 0;
+    cputs("\r\n");
+    cursor(0);
+}
+
+static int run_system_program(const char* name, const char* arguments)
+{
+    unsigned char drive = current_drive;
+    int result;
+
+    cmdp_arguments = arguments;
+    current_drive = 8;
+    result = run_program(name);
+    current_drive = drive;
+    return result;
+}
+
 unsigned char reu_detected;
 unsigned char reu_probe(void);
 unsigned char vdc_vram_kib(void);
@@ -448,6 +509,32 @@ void reu_format(void);
 unsigned char mounted;
 void __fastcall__ reu_write_entry(unsigned char slot);
 
+static void format_reu_volume(void)
+{
+    unsigned char key;
+
+    if (reu_detected != 2) {
+        cputs("M: se requiere una REU de 16 MiB.\r\n");
+        return;
+    }
+    if (mounted) {
+        cputs("M: ya esta formateada y montada.\r\n");
+        return;
+    }
+
+    cputs("Formatear M:? Se inicializara el directorio. (S/N) ");
+    do {
+        key = cgetc();
+    } while (key != 's' && key != 'S' && key != 'n' && key != 'N' && key != CH_ESC);
+    cputs("\r\n");
+    if (key != 's' && key != 'S') {
+        cputs("Formato cancelado.\r\n");
+        return;
+    }
+    reu_format();
+    mounted = reu_mount();
+    cputs(mounted ? "M: formateada y montada.\r\n" : "Error al formatear M:.\r\n");
+}
 
 void main(void)
 {
@@ -470,13 +557,17 @@ void main(void)
         cputs("REU detectada.\r\n");
     }
     if (reu_detected == 2) mounted = reu_mount();
-
+    cmdosk_bind_help();
+    cputs("\r\nEscriba HELP o pulse la tecla HELP para ayuda.\r\n");
 
     for (;;) {
-        prompt();
-        if (cgets(command_line, CMDLINE_SIZE) == 0) {
+        if (bank1_suspend_pending) {
+            bank1_suspend_pending = 0;
+            cmdosk_session_switch_pending();
             continue;
         }
+        prompt();
+        read_command();
         command = command_line;
         trim_left(&command);
         trim_right(command);
@@ -486,7 +577,7 @@ void main(void)
         if (strcmp(command_upper, "DIR") == 0) {
             if (current_drive == REU_DRIVE) {
                 unsigned char slot, used = 0;
-                cputs("Directorio M:\r\n");
+                cputs("Directorio M:\r\n\r\n");
                 for (slot = 0; slot < 16; ++slot) {
                     reu_dir_read(slot);
                     if (*reu_dir_name) {
@@ -503,6 +594,7 @@ void main(void)
                         cputs("\r\n");
                     }
                 }
+                if (used) cputs("\r\n");
                 print_unsigned((unsigned int)used << 6, 0, ' ');
                 cputs(" KiB utilizados, ");
                 print_unsigned(1024u - ((unsigned int)used << 6), 0, ' ');
@@ -520,7 +612,7 @@ void main(void)
                 last_exit_code = run_program(program_name);
             }
         } else if (strcmp(command_upper, "HELP") == 0) {
-            show_help();
+            run_system_program("help.cmd", "");
         } else if (strcmp(command_upper, "STATUS") == 0) {
             if (last_exit_code < 0) cputc('-');
             print_unsigned(last_exit_code < 0 ? -(long)last_exit_code : last_exit_code, 0, ' ');
@@ -541,18 +633,14 @@ void main(void)
         } else if (strcmp(command_upper, "D:") == 0) {
             select_drive(11);
         } else if (!strcmp(command_upper, "COPY") || !strncmp(command_upper, "COPY ", 5)) {
-            unsigned char drive = current_drive;
-            cmdp_arguments = command + 4;
-            current_drive = 8;
-            last_exit_code = run_program("copy.cmd");
-            current_drive = drive;
+            last_exit_code = run_system_program("copy.cmd", command + 4);
         } else if (strncmp(command_upper, "DEL ", 4) == 0) {
             unsigned char slot;
             char* name = command + 4;
             trim_left(&name);
             if (current_drive && valid_filename(name) && iec_file_type(name) != 255) {
                 memcpy(name - 3, "s0:", 3);
-                if (tui_disk_command(current_drive, name - 3) == 1) cputs("Borrado.\r\n");
+                if (cmdosk_disk_command(current_drive, name - 3) == 1) cputs("Borrado.\r\n");
                 else cputs("Error.\r\n");
             } else if (!current_drive && *name && (slot = reu_find(name))) {
                 *reu_dir_name = 0;
@@ -567,15 +655,15 @@ void main(void)
             if (mounted) {
                 current_drive = REU_DRIVE;
                 cputs("Unidad activa: M: (REU)\r\n");
+            } else if (reu_detected == 2) {
+                cputs("M: volumen sin formato valido. Use FORMAT M:.\r\n");
+            } else if (reu_detected) {
+                cputs("M: la REU detectada no es compatible. Se requieren 16 MiB.\r\n");
+            } else {
+                cputs("M: no se detecto una REU.\r\n");
             }
-            else cputs(reu_detected == 2 ? "Use FORMAT M:.\r\n" : "M: sin REU.\r\n");
-        } else if (strcmp(command_upper, "FORMAT M:") == 0 && reu_detected == 2 && !mounted) {
-            cputs("M: S/N ");
-            if (cgetc() == 's') {
-                reu_format();
-                mounted = reu_mount();
-            }
-            cputs("\r\n");
+        } else if (strcmp(command_upper, "FORMAT M:") == 0) {
+            format_reu_volume();
         } else if (*command != '\0' && !run_implicit(command)) {
             cputs("Comando invalido\r\n");
         }

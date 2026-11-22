@@ -11,6 +11,7 @@ con la CPU a 2 MHz. El arranque informa la VRAM instalada y la REU detectada.
 - `DEL nombre` borra en la unidad activa. `COPY origen destino` exige las dos unidades, por ejemplo `COPY A:edit.cmd M:edit.cmd`, y admite PRG, SEQ y USR sin reemplazar el destino.
 - Los nombres distinguen mayúsculas y minúsculas. Se admiten letras, dígitos, guion y guion bajo, con un punto opcional antes de la extensión. CMD-OS genera nombres en minúsculas.
 - `EDIT` abre y guarda documentos SEQ de hasta 34 KiB en IEC o en `M:`. F1 abre, F3 guarda, F5 guarda con otro nombre y F7 abre los menús. Enter con el nombre vacío muestra un selector filtrado por tipo.
+- Escribí `HELP` o pulsá la tecla HELP en el intérprete para abrir la guía de comandos desde la unidad 8.
 - `MEM` informa el mapa de ambos bancos, las reservas, el margen del kernel y la detección de REU. `EXIT` indica cuándo se puede apagar el equipo.
 
 ## Disco privado M:
@@ -19,7 +20,19 @@ Con una REU de 16 MiB compatible, `FORMAT M:` inicializa el volumen tras pedir
 confirmación. `M:` lo selecciona y permite usar `DIR`, `RUN`, `DEL`, `COPY`
 y `EDIT`. El formato actual tiene 16 ranuras de 64 KiB, con un límite de
 65.535 bytes por archivo. `DIR` informa los tamaños, los tipos IEC y el espacio
-asignado y libre por ranuras. `COPY` carga su aplicación desde la unidad 8.
+asignado y libre por ranuras. El listado deja una línea en blanco después
+de la cabecera y antes de los totales. `COPY` carga su aplicación desde la
+unidad 8 y delega la transferencia al kernel.
+
+## Suspender y reanudar aplicaciones
+
+Con `M:` montado, pulsá `Alt+Tab` desde el intérprete o desde `EDIT`.
+En VICE podés usar `Ctrl+Y` si el anfitrión captura `Alt+Tab`. Desde
+`EDIT`, elegí **Interprete** u otra sesión suspendida. Desde el intérprete,
+elegí una sesión para reanudarla. Esc vuelve a la pantalla activa. El
+intercambio muestra su progreso y guarda cada sesión en un archivo `.swp`
+de `M:`. Al reanudar `EDIT`, se recupera el documento con sus cambios sin
+guardar y se repinta la pantalla.
 
 ## Memoria
 
@@ -30,8 +43,8 @@ las copias antiguas de `hello.cmd`, `mem.cmd` y `copy.cmd` guardadas en la REU.
 VIC-II para respaldar el área común y parte de la RAM de color para respaldar
 la configuración del teclado.
 
-Quedan pendientes los lotes, la suspensión de aplicaciones Bank 1 con
-`Alt+Tab` y archivos `.swp`, y el soporte de NeoRAM Remix. Consultá los
+Quedan pendientes los lotes, la recuperación de sesiones tras reiniciar
+y el soporte de NeoRAM Remix. Consultá los
 [lineamientos de CMD-OS](doc/lineamientos-cmd-os.md) para el mapa y los contratos
 del prototipo.
 

@@ -25,7 +25,16 @@ New-Item -ItemType Directory -Force $buildDir | Out-Null
 $cl65 = Join-Path $Cc65Bin 'cl65.exe'
 & $cl65 -t c128 -O -C (Join-Path $projectRoot 'cfg\cmdos.cfg') -m $map -o $program `
     (Join-Path $projectRoot 'src\runtime\cmdos-crt0.s') $source `
-    (Join-Path $projectRoot 'src\kernel\tui.c') `
+    (Join-Path $projectRoot 'src\kernel\cmdosk-dispatch.c') `
+    (Join-Path $projectRoot 'src\kernel\cmdosk-tui.c') `
+    (Join-Path $projectRoot 'src\kernel\cmdosk-picker.c') `
+    (Join-Path $projectRoot 'src\kernel\cmdosk-menu.c') `
+    (Join-Path $projectRoot 'src\kernel\cmdosk-disk.c') `
+    (Join-Path $projectRoot 'src\kernel\cmdosk-copy.c') `
+    (Join-Path $projectRoot 'src\kernel\cmdosk-swap.c') `
+    (Join-Path $projectRoot 'src\kernel\cmdosk-sessions.c') `
+    (Join-Path $projectRoot 'src\kernel\cmdosk-bank1.c') `
+    (Join-Path $projectRoot 'src\kernel\cmdosk-keyboard.s') `
     (Join-Path $projectRoot 'src\kernel\bank1-gate.s') `
     (Join-Path $projectRoot 'src\kernel\reu.s') `
     (Join-Path $projectRoot 'src\kernel\vdc-probe.s')
@@ -59,7 +68,7 @@ $memoryRows += '    { "VIC-II: respaldo area comun", 0x0400, 0x05F6, 0 },',
     '    { "Pila C CMD-OS (reserva)", 0xB800, 0xBFFF, 0 },'
 Set-Content -LiteralPath $memoryInclude -Value $memoryRows -Encoding Ascii
 
-foreach ($app in 'hello', 'mem', 'copy') {
+foreach ($app in 'hello', 'mem', 'copy', 'help') {
     $appSource = Join-Path $projectRoot "src\apps\$app.c"
     $appRaw = Join-Path $buildDir "$app.raw"
     $appCmd = Join-Path $buildDir "$app.cmd"
@@ -89,6 +98,7 @@ $c1541 = Join-Path $viceBin 'c1541.exe'
     -write (Join-Path $buildDir 'hello.cmd') hello.cmd `
     -write (Join-Path $buildDir 'mem.cmd') mem.cmd `
     -write (Join-Path $buildDir 'copy.cmd') copy.cmd `
+    -write (Join-Path $buildDir 'help.cmd') help.cmd `
     -write $editCmd edit.cmd
 if ($LASTEXITCODE -ne 0) { throw "VICE c1541 no pudo crear la imagen D71." }
 
