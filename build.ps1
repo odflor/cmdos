@@ -26,7 +26,9 @@ $cl65 = Join-Path $Cc65Bin 'cl65.exe'
 & $cl65 -t c128 -O -C (Join-Path $projectRoot 'cfg\cmdos.cfg') -m $map -o $program `
     (Join-Path $projectRoot 'src\runtime\cmdos-crt0.s') $source `
     (Join-Path $projectRoot 'src\kernel\tui.c') `
-    (Join-Path $projectRoot 'src\kernel\bank1-gate.s')
+    (Join-Path $projectRoot 'src\kernel\bank1-gate.s') `
+    (Join-Path $projectRoot 'src\kernel\reu.s') `
+    (Join-Path $projectRoot 'src\kernel\vdc-probe.s')
 if ($LASTEXITCODE -ne 0) { throw "CC65 no pudo compilar CMD-OS." }
 
 # Extract the segment table; LOADADDR is the PRG file prefix, not a RAM segment.
@@ -41,30 +43,32 @@ $memoryRows = foreach ($segment in $segments) {
     $name, $start, $end, $size = $segment.Groups[1..4].Value
     if ($name -ne 'LOADADDR' -and $size -ne '000000') {
         $endAddress = [Convert]::ToInt32($end, 16)
-        if ($endAddress -ge 0x5000) {
+        if ($endAddress -ge 0x7000) {
             throw "El segmento $name de CMD-OS invade la zona reservada para aplicaciones."
         }
         $residentEnd = [Math]::Max($residentEnd, $endAddress)
         '    {{ "{0}", 0x{1}, 0x{2}, 0 }},' -f $name, $start, $end
     }
 }
-if ($residentEnd -lt 0x4FFF) {
-    $memoryRows += '    {{ "RAM libre para CMD-OS", 0x{0:X4}, 0x4FFF, 1 }},' -f ($residentEnd + 1)
+if ($residentEnd -lt 0x6FFF) {
+    $memoryRows += '    {{ "RAM libre para CMD-OS", 0x{0:X4}, 0x6FFF, 1 }},' -f ($residentEnd + 1)
 }
-$memoryRows += '    { "Area CMDP (reserva)", 0x5000, 0xAFFF, 0 },',
+$memoryRows += '    { "VIC-II: respaldo area comun", 0x0400, 0x05F6, 0 },',
+    '    { "Area CMDP (reserva)", 0x7000, 0xAFFF, 0 },',
     '    { "Pila C CMDP (reserva)", 0xB000, 0xB7FF, 0 },',
     '    { "Pila C CMD-OS (reserva)", 0xB800, 0xBFFF, 0 },'
 Set-Content -LiteralPath $memoryInclude -Value $memoryRows -Encoding Ascii
 
-foreach ($app in 'hello', 'mem') {
+foreach ($app in 'hello', 'mem', 'copy') {
     $appSource = Join-Path $projectRoot "src\apps\$app.c"
     $appRaw = Join-Path $buildDir "$app.raw"
     $appCmd = Join-Path $buildDir "$app.cmd"
     & $cl65 -t c128 -O -I $buildDir -C $appCfg -o $appRaw $appSource $appCrt0
     if ($LASTEXITCODE -ne 0) { throw "CC65 no pudo compilar la aplicacion $app." }
 
+    $apiVersion = 2
     & (Join-Path $projectRoot 'tools\make-cmd-program.ps1') `
-        -InputFile $appRaw -OutputFile $appCmd -Bank BANK0
+        -InputFile $appRaw -OutputFile $appCmd -Bank BANK0 -ApiVersion $apiVersion
 }
 
 $editRaw = Join-Path $buildDir 'edit.raw'
@@ -84,6 +88,7 @@ $c1541 = Join-Path $viceBin 'c1541.exe'
     -write $program boot `
     -write (Join-Path $buildDir 'hello.cmd') hello.cmd `
     -write (Join-Path $buildDir 'mem.cmd') mem.cmd `
+    -write (Join-Path $buildDir 'copy.cmd') copy.cmd `
     -write $editCmd edit.cmd
 if ($LASTEXITCODE -ne 0) { throw "VICE c1541 no pudo crear la imagen D71." }
 

@@ -17,7 +17,7 @@
 #define REVERSE 0x80
 #define SAVE_TEMP "cmdos-edit.tmp"
 #define SAVE_BACKUP "cmdos-edit.bak"
-#define FILE_NAME_RESERVED ",:@*?$\"="
+#include "../kernel/filename.h"
 
 /* The cursor is the gap. Text after it starts at tail. */
 static unsigned int head, tail = CAPACITY, top;
@@ -279,8 +279,8 @@ static unsigned char browse_name(char* name)
     if (!TUI_REQUEST.result) {
         return 0;
     }
-    if (strpbrk((char*)TUI_REQUEST.data, FILE_NAME_RESERVED)) {
-        status = "El nombre contiene caracteres reservados";
+    if (!valid_filename((char*)TUI_REQUEST.data)) {
+        status = "Nombre de archivo invalido";
         return 0;
     }
     strcpy(name, (char*)TUI_REQUEST.data);
@@ -306,12 +306,13 @@ static unsigned char ask_name(const char* title, char* name, const char* suggest
             return 0;
         }
         if (value == CH_ENTER || value == 10) {
-            return count ? 1 : browse_name(name);
+            if (!count) return browse_name(name);
+            if (valid_filename(name)) return 1;
+            popup(title, " Nombre invalido. Corrija el nombre o pulse Esc");
         }
         if (value == CH_DEL && count) {
             name[--count] = 0;
-        } else if ((count < FILENAME_MAX || suggested) && printable(value) &&
-                   !strchr(FILE_NAME_RESERVED, value)) {
+        } else if ((count < FILENAME_MAX || suggested) && printable(value)) {
             if (suggested) {
                 count = 0;
             }
@@ -519,7 +520,7 @@ static unsigned char menu(void)
     return value;
 }
 
-void main(void)
+int main(void)
 {
     unsigned char value;
 
@@ -542,7 +543,7 @@ void main(void)
             }
             if (value == MENU_EXIT) {
                 if (discard()) {
-                    return;
+                    return 0;
                 }
                 continue;
             }

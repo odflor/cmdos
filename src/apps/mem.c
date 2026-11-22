@@ -83,10 +83,22 @@ static void show_bank(const char* title, const struct segment* segments,
     cputs(" KiB\r\n");
 }
 
-void main(void)
+#include "../kernel/tui.h"
+
+int main(void)
 {
     show_bank("\r\nCMD-OS: mapa de memoria del banco 0\r\n",
               bank0, sizeof(bank0) / sizeof(bank0[0]));
+    cputs("Color VIC-II: $D800-$D823, 36 celdas de 4 bits (18 bytes).\r\n");
     show_bank("CMD-OS: mapa de memoria del banco 1\r\n",
               bank1, sizeof(bank1) / sizeof(bank1[0]));
+    TUI_REQUEST.operation = TUI_REU;
+    ((void (*)(void))0x0E00)();
+    if (TUI_REQUEST.result == 2)
+        cputs("REU: 16 MiB (banco de 8 MiB verificado)\r\n");
+    else if (TUI_REQUEST.result)
+        cputs("REU: detectada, capacidad sin confirmar\r\n");
+    else
+        cputs("REU: no detectada\r\n");
+    return 0;
 }

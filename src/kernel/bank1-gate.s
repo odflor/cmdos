@@ -27,6 +27,11 @@ _bank1_run:
 
 ; Copied to the common sprite reservation before changing the MMU.
 _bank1_gate:
+        lda MMU_CR
+        and #$40
+        bne from_bank1
+        jmp _tui_dispatch
+from_bank1:
         ; Share hardware stack and zero page, but use the resident C stack
         ; and run ROM interrupts only while Bank 0 is mapped.
         sei
@@ -87,6 +92,9 @@ save_shell:
         lda #bank1
         sta MMU_CR
         jsr gate+(entry-_bank1_gate)
+        pha
+        txa
+        pha
         lda #MMU_CFG_CC65
         sta MMU_CR
         ldx #zpspace-1
@@ -95,6 +103,9 @@ restore_shell:
         sta c_sp,x
         dex
         bpl restore_shell
+        pla
+        tax
+        pla
         plp
         rts
 entry:

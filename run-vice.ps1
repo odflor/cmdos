@@ -11,4 +11,4 @@ if (-not (Test-Path $disk)) {
     & (Join-Path $projectRoot 'build.ps1') -ViceBin $ViceBin
 }
 
-& $vice -drive8type 1571 -8 $disk
+& $vice -drive8type 1571 -8 $disk -VDC16KB -80col -reu -reusize 16384

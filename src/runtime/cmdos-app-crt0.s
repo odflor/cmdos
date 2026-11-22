@@ -61,6 +61,7 @@ L1:     lda     c_sp,x
         jsr     callmain
 
 _exit:
+        stx     exitsave
         pha
         jsr     donelib
 
@@ -80,6 +81,7 @@ L2:     lda     zpsave,x
         txs
         ldx     mmusave
         stx     MMU_CR
+        ldx     exitsave
 
         rts
 
@@ -90,3 +92,4 @@ zpsave: .res zpspace
 spsave:   .res 1
 mmusave:  .res 1
 initsave: .res 1
+exitsave: .res 1

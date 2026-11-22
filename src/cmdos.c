@@ -1,7 +1,7 @@
 #include <c128.h>
 #include <cbm.h>
 #include <conio.h>
-#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "kernel/tui.h"
 
@@ -14,11 +14,21 @@
 #define CMDP_HEADER_SIZE 16
 #define CMDP_FLAG_BANK0  0x01
 #define CMDP_FLAG_BANK1  0x02
-#define APP_LOAD_ADDRESS 0x5000
+#define APP_LOAD_ADDRESS 0x7000
 /* The application's C stack starts at $B000. */
 #define APP_LOAD_LIMIT   0xB000
 
 static unsigned char current_drive = 8;
+#define REU_DRIVE 0
+void __fastcall__ reu_dir_read(unsigned char slot);
+extern char reu_dir_name[17];
+extern unsigned int reu_dir_size;
+extern unsigned char reu_dir_type;
+extern unsigned char reu_offset[3];
+extern void* reu_buffer;
+extern unsigned int reu_length;
+void __fastcall__ reu_transfer(unsigned char command);
+extern unsigned int reu_position;
 static char command_line[CMDLINE_SIZE];
 
 static unsigned int little_endian_word(const unsigned char* bytes)
@@ -29,7 +39,27 @@ static unsigned int little_endian_word(const unsigned char* bytes)
 
 static char drive_letter(void)
 {
-    return (char)('A' + (current_drive - 8));
+    return current_drive ? (char)('A' + (current_drive - 8)) : 'M';
+}
+
+static void print_unsigned(unsigned long value, unsigned char width, char pad)
+{
+    char digits[11];
+    unsigned char length;
+
+    ultoa(value, digits, 10);
+    length = strlen(digits);
+    while (length < width) {
+        cputc(pad);
+        ++length;
+    }
+    cputs(digits);
+}
+
+static void print_drive(void)
+{
+    cputc(drive_letter());
+    cputc(':');
 }
 
 static void uppercase(char* text)
@@ -61,11 +91,7 @@ static void trim_right(char* text)
 
 static void print_name(const char* name)
 {
-    unsigned char index = 0;
-    while (index < 16 && name[index] != '\0') {
-        cbm_k_bsout((unsigned char)name[index]);
-        ++index;
-    }
+    while (*name) cbm_k_bsout((unsigned char)*name++);
 }
 
 static const char* file_type(unsigned char type)
@@ -83,90 +109,43 @@ static const char* file_type(unsigned char type)
 
 static void directory_error(unsigned char error, const char* action)
 {
-    cprintf("ERROR: %s en %c: (dispositivo %u). ", action,
-            drive_letter(), current_drive);
-    switch (error) {
-        case 2: cputs("El archivo no se pudo abrir.\r\n"); break;
-        case 4: cputs("Archivo o directorio no encontrado.\r\n"); break;
-        case 5: cputs("La unidad no esta presente o no responde.\r\n"); break;
-        case 9: cputs("Numero de dispositivo no valido.\r\n"); break;
-        case 11: cputs("Error general de entrada/salida.\r\n"); break;
-        default: cputs("La unidad no pudo entregar el directorio.\r\n"); break;
-    }
+    cputs("ERROR ");
+    print_unsigned(error, 0, ' ');
+    cputs(" al ");
+    cputs(action);
+    cputs(" en ");
+    print_drive();
+    cputs(".\r\n");
 }
 
 static unsigned char read_disk_header(void)
 {
-    char title[17];
-    char disk_id[3];
-    char dos_type[3];
-    unsigned char byte;
-    unsigned char count = 0;
-    unsigned char index;
+    unsigned char byte, count;
 
-    if (cbm_open(DIR_LFN, current_drive, CBM_READ, "$") != 0) {
-        return 5;
-    }
-    if (cbm_k_chkin(DIR_LFN) != 0) {
+    if (cbm_open(DIR_LFN, current_drive, CBM_READ, "$")) return 5;
+    if (cbm_k_chkin(DIR_LFN)) {
         cbm_k_clall();
         return 5;
     }
-
-    cbm_k_basin();
-    cbm_k_basin();
-    cbm_k_basin();
-    cbm_k_basin();
-    byte = cbm_k_basin();
-    while (byte != '"' && !cbm_k_readst()) {
+    /* The drive sends a BASIC directory stream, including its binary prefix. */
+    for (count = 0; count < 4; ++count) cbm_k_basin();
+    do {
         byte = cbm_k_basin();
-    }
+    } while (byte != '"' && !cbm_k_readst());
     if (byte != '"') {
         cbm_k_clrch();
         cbm_k_clall();
         return 3;
     }
-
-    while (!cbm_k_readst()) {
-        byte = cbm_k_basin();
-        if (byte == '"' || byte == 0) {
-            break;
-        }
-        if (count < 16) {
-            title[count++] = (char)byte;
-        }
-    }
-    title[count] = '\0';
-
-    /* After the closing quote: space, two-byte ID, space, two-byte DOS type.
-       Preserve the original PETSCII bytes, including either letter case. */
-    if (byte != '"' || cbm_k_readst()) {
-        cbm_k_clrch();
-        cbm_k_clall();
-        return 3;
-    }
-    cbm_k_basin();
-    disk_id[0] = (char)cbm_k_basin();
-    disk_id[1] = (char)cbm_k_basin();
-    disk_id[2] = '\0';
-    cbm_k_basin();
-    dos_type[0] = (char)cbm_k_basin();
-    dos_type[1] = (char)cbm_k_basin();
-    dos_type[2] = '\0';
-
     cbm_k_bsout(0x12);
-    cbm_k_bsout('"');
-    for (index = 0; index < count; ++index) {
-        cbm_k_bsout((unsigned char)title[index]);
-    }
-    cbm_k_bsout('"');
-    cputs(" ");
-    print_name(disk_id);
-    cputs(" ");
-    print_name(dos_type);
+    do {
+        cbm_k_bsout(byte);
+        byte = cbm_k_basin();
+    } while (byte && !cbm_k_readst());
     cbm_k_bsout(0x92);
-    cputs("\r\n\r\n");
     cbm_k_clrch();
     cbm_k_clall();
+    cputs("\r\n\r\n");
     return 0;
 }
 
@@ -182,7 +161,11 @@ static void print_block_size(unsigned long blocks)
         ++whole;
         fraction = 0;
     }
-    cprintf(" (%lu.%02u KiB)", whole, fraction);
+    cputs(" (");
+    print_unsigned(whole, 0, ' ');
+    cputc('.');
+    print_unsigned(fraction, 2, '0');
+    cputs(" KiB)");
 }
 
 static void show_directory(void)
@@ -191,17 +174,19 @@ static void show_directory(void)
     unsigned char result;
     unsigned long used_blocks = 0;
 
-    cprintf("\r\nDIRECTORY %c: (dispositivo %u)\r\n", drive_letter(), current_drive);
+    cputs("\r\nDIRECTORY ");
+    print_drive();
+    cputs("\r\n");
     cbm_k_clall();
     result = read_disk_header();
     if (result != 0) {
-        directory_error(result, "leer la cabecera del disco");
+        directory_error(result, "DIR");
         return;
     }
     result = cbm_opendir(DIR_LFN, current_drive);
     if (result != 0) {
         cbm_k_clall();
-        directory_error(result, "abrir el directorio");
+        directory_error(result, "DIR");
         return;
     }
 
@@ -212,21 +197,27 @@ static void show_directory(void)
             continue;
         } else {
             used_blocks += entry.size;
-            cprintf("%5u", entry.size);
+            print_unsigned(entry.size, 5, ' ');
             print_block_size(entry.size);
             cputs(" \"");
             print_name(entry.name);
-            cprintf("\" %s\r\n", file_type(entry.type));
+            cputs("\" ");
+            cputs(file_type(entry.type));
+            cputs("\r\n");
         }
     }
     if (result == 2) {
-        cprintf("\r\n%lu bloques utilizados", used_blocks);
+        cputs("\r\n");
+        print_unsigned(used_blocks, 0, ' ');
+        cputs(" bloques utilizados");
         print_block_size(used_blocks);
-        cprintf("\r\n%u bloques libres", entry.size);
+        cputs("\r\n");
+        print_unsigned(entry.size, 0, ' ');
+        cputs(" bloques libres");
         print_block_size(entry.size);
         cputs("\r\n");
     } else if (result != 0) {
-        cputs("ERROR: no se pudo leer completamente el directorio.\r\n");
+        cputs("DIR incompleto.\r\n");
     }
     cbm_closedir(DIR_LFN);
     cbm_k_clall();
@@ -234,41 +225,21 @@ static void show_directory(void)
 
 static void show_help(void)
 {
-    cputs("\r\nComandos: DIR, RUN, A:, B:, C:, D:, M:, HELP, VER, EXIT\r\n");
-    cputs("DIR muestra el contenido de la unidad activa.\r\n");
-    cputs("RUN nombre.cmd carga una aplicacion CMD-OS.\r\n");
-    cputs("Tambien puede escribir solo el nombre de una aplicacion .cmd.\r\n");
-    cputs("A: selecciona la unidad 8.\r\n");
-    cputs("B: selecciona la unidad 9.\r\n");
-    cputs("C: selecciona la unidad 10.\r\n");
-    cputs("D: selecciona la unidad 11.\r\n");
-    cputs("M: selecciona el futuro disco virtual en memoria.\r\n");
-    cputs("HELP muestra esta ayuda.\r\n");
-    cputs("VER muestra la version de CMD-OS.\r\n");
-    cputs("EXIT prepara el equipo para el apagado.\r\n");
+    cputs("DIR RUN COPY DEL A:-D: M: FORMAT M: HELP STATUS VER EXIT\r\n");
 }
 
-static unsigned char has_extension(const char* name)
-{
-    while (*name) {
-        if (*name == '.') {
-            return 1;
-        }
-        ++name;
-    }
-    return 0;
-}
+#include "kernel/filename.h"
 
 static unsigned char make_program_name(const char* requested, char* name)
 {
     unsigned int length = (unsigned int)strlen(requested);
 
-    if (length == 0 || length >= 31) {
+    if (!valid_filename(requested)) {
         return 1;
     }
     strcpy(name, requested);
-    if (!has_extension(name)) {
-        if (length + 4 >= 31) {
+    if (!strchr(name, '.')) {
+        if (length + 4 > CMDOS_FILENAME_MAX) {
             return 1;
         }
         strcat(name, ".cmd");
@@ -276,7 +247,47 @@ static unsigned char make_program_name(const char* requested, char* name)
     return 0;
 }
 
-static unsigned char run_program(const char* requested)
+static int last_exit_code;
+const char* cmdp_arguments;
+
+static void split_program(char* name)
+{
+    char* tail = name + strcspn(name, " \t");
+
+    if (*tail) {
+        *tail++ = '\0';
+        trim_left(&tail);
+    }
+    cmdp_arguments = tail;
+}
+
+unsigned char reu_find(const char* name)
+{
+    unsigned char slot;
+    for (slot = 0; slot < 16; ++slot) {
+        reu_dir_read(slot);
+        if (strcmp(name, reu_dir_name) == 0) return slot + 1;
+    }
+    return 0;
+}
+
+unsigned int reu_read(void* buffer, unsigned int size)
+{
+    unsigned int remaining = reu_dir_size - reu_position;
+    if (size > remaining) size = remaining;
+    reu_buffer = buffer;
+    reu_length = size;
+    reu_transfer(0x91);
+    reu_position += size;
+    return size;
+}
+
+static int read_program(void* buffer, unsigned int size)
+{
+    return current_drive ? cbm_read(PROGRAM_LFN, buffer, size) : reu_read(buffer, size);
+}
+
+static int run_program(const char* requested)
 {
     unsigned char header[CMDP_HEADER_SIZE];
     char name[32];
@@ -287,32 +298,33 @@ static unsigned char run_program(const char* requested)
     int result;
     unsigned int copied, chunk;
     unsigned char bank1;
-    void (*entry)(void);
+    int (*entry)(void);
+    int exit_code;
 
     if (make_program_name(requested, name) != 0) {
-        cputs("ERROR: nombre de programa demasiado largo.\r\n");
+        cputs("Nombre invalido\r\n");
         return 1;
     }
 
-    result = cbm_open(PROGRAM_LFN, current_drive, CBM_READ, name);
+    if (current_drive) {
+        result = cbm_open(PROGRAM_LFN, current_drive, CBM_READ, name);
+    } else {
+        reu_offset[2] = reu_find(name);
+        reu_position = 0;
+        result = reu_offset[2] ? 0 : 4;
+    }
     if (result != 0) {
-        directory_error((unsigned char)result, "abrir la aplicacion");
+        directory_error((unsigned char)result, "RUN");
         return 1;
     }
 
-    result = cbm_read(PROGRAM_LFN, header, CMDP_HEADER_SIZE);
-    if (result != CMDP_HEADER_SIZE) {
-        cbm_k_clall();
-        cputs("ERROR: la aplicacion no tiene una cabecera CMDP valida.\r\n");
-        return 1;
-    }
+    result = read_program(header, CMDP_HEADER_SIZE);
+    if (result != CMDP_HEADER_SIZE) goto invalid_cmdp;
 
     /* CMDP is an on-disk binary signature, not a PETSCII C string. */
     if (header[0] != 0x43 || header[1] != 0x4D ||
         header[2] != 0x44 || header[3] != 0x50 || header[4] != 1) {
-        cbm_k_clall();
-        cputs("ERROR: formato CMDP o version no reconocidos.\r\n");
-        return 1;
+        goto invalid_cmdp;
     }
 
     flags = header[5];
@@ -322,18 +334,14 @@ static unsigned char run_program(const char* requested)
 
     bank1 = flags == CMDP_FLAG_BANK1;
     if (!bank1 && !(flags & CMDP_FLAG_BANK0)) {
-        cbm_k_clall();
-        cputs("ERROR: la aplicacion no declara un banco compatible.\r\n");
-        return 1;
+        goto invalid_cmdp;
     }
 
     if (entry_offset >= payload_size ||
         (bank1 ? (header[12] != 2 || load_address != 0x1000 || payload_size > 0x2400)
-               : (header[12] > 1 || load_address != APP_LOAD_ADDRESS ||
+               : (header[12] > 2 || load_address != APP_LOAD_ADDRESS ||
                   payload_size > (APP_LOAD_LIMIT - APP_LOAD_ADDRESS)))) {
-        cbm_k_clall();
-        cputs("ERROR: requisitos de memoria o API no compatibles.\r\n");
-        return 1;
+        goto invalid_cmdp;
     }
 
     if (bank1) {
@@ -344,10 +352,10 @@ static unsigned char run_program(const char* requested)
             if (chunk > TUI_TRANSFER) {
                 chunk = TUI_TRANSFER;
             }
-            if (cbm_read(PROGRAM_LFN, TUI_REQUEST.data, chunk) != (int)chunk) {
+            if (read_program(TUI_REQUEST.data, chunk) != (int)chunk) {
                 cbm_k_clall();
                 bank1_finish();
-                cputs("ERROR: no se pudo cargar completamente la aplicacion.\r\n");
+                cputs("Carga incompleta.\r\n");
                 return 1;
             }
             TUI_REQUEST.count = (unsigned char)chunk;
@@ -356,72 +364,90 @@ static unsigned char run_program(const char* requested)
         }
         cbm_k_clall();
         tui_editor_keys(1);
-        bank1_run(load_address + entry_offset);
+        exit_code = bank1_run(load_address + entry_offset);
         tui_editor_keys(0);
         bank1_finish();
         tui_reset();
-        return 0;
+        return exit_code;
     }
 
-    result = cbm_read(PROGRAM_LFN, (void*)load_address, payload_size);
+    result = read_program((void*)load_address, payload_size);
     cbm_k_clall();
     if (result != (int)payload_size) {
-        cputs("ERROR: no se pudo cargar completamente la aplicacion.\r\n");
+        cputs("Carga incompleta.\r\n");
         return 1;
     }
 
-    entry = (void (*)(void))(load_address + entry_offset);
-    entry();
-    return 0;
+    entry = (int (*)(void))(load_address + entry_offset);
+    if (header[12] == 2) {
+        bank1_prepare(current_drive ? current_drive : 8);
+        exit_code = entry();
+        bank1_finish();
+        return exit_code;
+    }
+    return entry();
+
+invalid_cmdp:
+    cbm_k_clall();
+    cputs("CMDP invalido.\r\n");
+    return 1;
 }
 
-static unsigned char run_implicit(const char* command)
+static unsigned char iec_file_type(const char* name)
 {
     struct cbm_dirent entry;
-    char name[17];
-    unsigned int length = strlen(command);
-    unsigned char matched = 0;
-
-    if (length > 16 || strpbrk(command, " \t*?:,=$@\"") != 0) {
-        return 0;
-    }
-    if (length >= 4 && strcmp(command + length - 4, ".cmd") == 0) {
-        strcpy(name, command);
-    } else {
-        if (length > 12) {
-            return 0;
-        }
-        strcpy(name, command);
-        strcat(name, ".cmd");
-    }
+    unsigned char type = 255;
 
     if (cbm_opendir(DIR_LFN, current_drive) == 0) {
         while (cbm_readdir(DIR_LFN, &entry) == 0) {
             entry.name[16] = '\0';
             if (entry.type != CBM_T_HEADER && strcmp(entry.name, name) == 0) {
-                matched = 1;
+                type = entry.type;
                 break;
             }
         }
         cbm_closedir(DIR_LFN);
     }
     cbm_k_clall();
-    if (matched) {
-        run_program(name);
-    }
-    return matched;
+    return type;
+}
+
+static unsigned char run_implicit(char* command)
+{
+    char name[17];
+
+    split_program(command);
+    if (make_program_name(command, name)) return 0;
+    if (current_drive ? iec_file_type(name) == 255 : !reu_find(name)) return 0;
+    last_exit_code = run_program(name);
+    return 1;
 }
 
 static void select_drive(unsigned char drive)
 {
     current_drive = drive;
-    cprintf("Unidad activa: %c: (dispositivo %u)\r\n", drive_letter(), current_drive);
+    cputs("Unidad activa: ");
+    print_drive();
+    cputs(" (dispositivo ");
+    print_unsigned(current_drive, 0, ' ');
+    cputs(")\r\n");
 }
 
 static void prompt(void)
 {
-    cprintf("CMD-OS %c:> ", drive_letter());
+    cputs("CMD-OS ");
+    print_drive();
+    cputs("> ");
 }
+
+unsigned char reu_detected;
+unsigned char reu_probe(void);
+unsigned char vdc_vram_kib(void);
+unsigned char reu_mount(void);
+void reu_format(void);
+unsigned char mounted;
+void __fastcall__ reu_write_entry(unsigned char slot);
+
 
 void main(void)
 {
@@ -433,13 +459,18 @@ void main(void)
     VIC_CONTROL_1 &= 0x6F;
     VIC_CLOCK |= 1;
     tui_reset();
-    cputs("CMD-OS bootloader\r\n");
-    cputs("Inicializando sistema nativo C128...\r\n");
-    cputs("Consola de 80 columnas lista.\r\n");
-    cputs("Unidades A: a D: disponibles en dispositivos 8 a 11.\r\n");
-    cputs("M: reservada para disco virtual en memoria.\r\n\r\n");
+    cputs("Command-OS (cmd-os)\r\nVDC: 80 columnas, ");
+    cputs(vdc_vram_kib() == 64 ? "64 KB" : "16 KB");
+    cputs(" de VRAM. CPU: 2 MHz.\r\n");
+    cputs("A: IEC 8.\r\n");
+    reu_detected = reu_probe();
+    if (reu_detected == 2) {
+        cputs("REU detectada: 16 MiB.\r\n");
+    } else if (reu_detected) {
+        cputs("REU detectada.\r\n");
+    }
+    if (reu_detected == 2) mounted = reu_mount();
 
-    cputs("\r\nEscriba HELP para ver los comandos disponibles.\r\n");
 
     for (;;) {
         prompt();
@@ -453,21 +484,51 @@ void main(void)
         uppercase(command_upper);
 
         if (strcmp(command_upper, "DIR") == 0) {
-            show_directory();
+            if (current_drive == REU_DRIVE) {
+                unsigned char slot, used = 0;
+                cputs("Directorio M:\r\n");
+                for (slot = 0; slot < 16; ++slot) {
+                    reu_dir_read(slot);
+                    if (*reu_dir_name) {
+                        unsigned int tenths = (reu_dir_size >> 10) * 10 +
+                            (((reu_dir_size & 1023) * 10 + 512) >> 10);
+                        ++used;
+                        print_unsigned(tenths / 10, 2, ' ');
+                        cputc('.');
+                        cputc('0' + tenths % 10);
+                        cputs(" KiB \"");
+                        cputs(reu_dir_name);
+                        cputs("\" ");
+                        cputs(file_type(reu_dir_type));
+                        cputs("\r\n");
+                    }
+                }
+                print_unsigned((unsigned int)used << 6, 0, ' ');
+                cputs(" KiB utilizados, ");
+                print_unsigned(1024u - ((unsigned int)used << 6), 0, ' ');
+                cputs(" KiB libres\r\n");
+            } else {
+                show_directory();
+            }
         } else if (strcmp(command_upper, "RUN") == 0 || strncmp(command_upper, "RUN ", 4) == 0) {
             char* program_name = command + 3;
             trim_left(&program_name);
             if (*program_name == '\0') {
-                cputs("Uso: RUN nombre.cmd\r\n");
+                cputs("RUN nombre.cmd\r\n");
             } else {
-                run_program(program_name);
+                split_program(program_name);
+                last_exit_code = run_program(program_name);
             }
         } else if (strcmp(command_upper, "HELP") == 0) {
             show_help();
+        } else if (strcmp(command_upper, "STATUS") == 0) {
+            if (last_exit_code < 0) cputc('-');
+            print_unsigned(last_exit_code < 0 ? -(long)last_exit_code : last_exit_code, 0, ' ');
+            cputs("\r\n");
         } else if (strcmp(command_upper, "VER") == 0) {
-            cputs("CMD-OS 0.2.0 - kernel comun y aplicaciones CMDP\r\n");
+            cputs("CMD-OS 0.2.0\r\n");
         } else if (strcmp(command_upper, "EXIT") == 0) {
-            cputs("Ya podes apagar el equipo.\r\n");
+            cputs("Ya podes apagar.\r\n");
             for (;;) {
                 cgetc();
             }
@@ -479,10 +540,44 @@ void main(void)
             select_drive(10);
         } else if (strcmp(command_upper, "D:") == 0) {
             select_drive(11);
+        } else if (!strcmp(command_upper, "COPY") || !strncmp(command_upper, "COPY ", 5)) {
+            unsigned char drive = current_drive;
+            cmdp_arguments = command + 4;
+            current_drive = 8;
+            last_exit_code = run_program("copy.cmd");
+            current_drive = drive;
+        } else if (strncmp(command_upper, "DEL ", 4) == 0) {
+            unsigned char slot;
+            char* name = command + 4;
+            trim_left(&name);
+            if (current_drive && valid_filename(name) && iec_file_type(name) != 255) {
+                memcpy(name - 3, "s0:", 3);
+                if (tui_disk_command(current_drive, name - 3) == 1) cputs("Borrado.\r\n");
+                else cputs("Error.\r\n");
+            } else if (!current_drive && *name && (slot = reu_find(name))) {
+                *reu_dir_name = 0;
+                reu_buffer = reu_dir_name;
+                reu_length = 1;
+                reu_write_entry(slot - 1);
+                cputs("Borrado.\r\n");
+            } else {
+                cputs("No existe.\r\n");
+            }
         } else if (strcmp(command_upper, "M:") == 0) {
-            cputs("M: esta reservada para el disco virtual en memoria.\r\n");
+            if (mounted) {
+                current_drive = REU_DRIVE;
+                cputs("Unidad activa: M: (REU)\r\n");
+            }
+            else cputs(reu_detected == 2 ? "Use FORMAT M:.\r\n" : "M: sin REU.\r\n");
+        } else if (strcmp(command_upper, "FORMAT M:") == 0 && reu_detected == 2 && !mounted) {
+            cputs("M: S/N ");
+            if (cgetc() == 's') {
+                reu_format();
+                mounted = reu_mount();
+            }
+            cputs("\r\n");
         } else if (*command != '\0' && !run_implicit(command)) {
-            cputs("Comando no reconocido. Escriba HELP.\r\n");
+            cputs("Comando invalido\r\n");
         }
     }
 }

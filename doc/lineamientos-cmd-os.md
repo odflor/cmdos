@@ -10,19 +10,21 @@ Medir por separado la carga de BOOT y la lectura desde RUN y EDIT en unidades qu
 
 ### Volumen privado M: y sesiones de Bank 1
 
+El atajo acordado para el menú de intercambio es `Alt+Tab`. Su captura en el C128 y en VICE queda pendiente de verificación.
+
 - Cuando se implemente el swap, EXIT indicará qué sesiones se podrán recuperar y cuáles se perderán al apagar. Si quedan sesiones suspendidas, pedirá confirmación. Esc devuelve el control al prompt.
 
-- `M:` será un volumen privado de CMD-OS. El kernel administrará la expansión y las aplicaciones CMDP usarán sus servicios de archivos. El volumen quedará fuera de la interfaz de dispositivos del KERNAL del C128. El primer controlador será para REU mediante DMA y NeoRAM Remix podrá usar el mismo formato con un controlador de copia paginada. El disco virtual y la suspensión de aplicaciones estarán disponibles solo si se detecta una expansión compatible y se monta el volumen. Sin expansión compatible, `EXIT` podrá realizar la comprobación de apagado sin consultar archivos de intercambio.
+- `M:` es un volumen privado de CMD-OS. El kernel administrará la expansión y las aplicaciones CMDP usarán sus servicios de archivos. El volumen quedará fuera de la interfaz de dispositivos del KERNAL del C128. El primer controlador usa REU mediante DMA y NeoRAM Remix podrá usar el mismo formato con un controlador de copia paginada. El disco virtual y la suspensión de aplicaciones estarán disponibles solo si se detecta una expansión compatible y se monta el volumen. Sin expansión compatible, `EXIT` podrá realizar la comprobación de apagado sin consultar archivos de intercambio.
 - Los archivos normales y los archivos de intercambio `.swp` compartirán el espacio del volumen. `DIR` podrá mostrar ambos y el gestor de sesiones controlará la creación, restauración y borrado de los `.swp`. CMD-OS validará el formato antes de montar el volumen y requerirá una orden explícita para formatearlo.
-- Si el contenido de la expansión se conserva o se restaura entre apagados, CMD-OS validará los `.swp` y su compatibilidad con la versión del sistema. Si encuentra sesiones recuperables, mostrará un aviso y seguirá hasta el prompt. La restauración se hará cuando el usuario elija una sesión mediante Alt+Help.
-- Alt+Help, pendiente de comprobar en el C128 y en VICE, abrirá el menú desde el intérprete o desde un CMDP de Bank 1 en un punto seguro del servicio de teclado. Desde el intérprete se mostrarán las sesiones suspendidas, incluidas las persistentes recuperables. Desde un CMDP se mostrarán el intérprete y las demás sesiones suspendidas. El contexto activo queda fuera de la lista. Esc cierra el menú y devuelve el control al contexto activo sin guardar ni cargar un `.swp`. El intercambio empieza al elegir otro destino. El estado se guardará antes de reutilizar su memoria. Si falta espacio, se podrá volver a la aplicación activa.
+- Si el contenido de la expansión se conserva o se restaura entre apagados, CMD-OS validará los `.swp` y su compatibilidad con la versión del sistema. Si encuentra sesiones recuperables, mostrará un aviso y seguirá hasta el prompt. La restauración se hará cuando el usuario elija una sesión mediante Alt+Tab.
+- Alt+Tab, pendiente de comprobar en el C128 y en VICE, abrirá el menú desde el intérprete o desde un CMDP de Bank 1 en un punto seguro del servicio de teclado. Desde el intérprete se mostrarán las sesiones suspendidas, incluidas las persistentes recuperables. Desde un CMDP se mostrarán el intérprete y las demás sesiones suspendidas. El contexto activo queda fuera de la lista. Esc cierra el menú y devuelve el control al contexto activo sin guardar ni cargar un `.swp`. El intercambio empieza al elegir otro destino. El estado se guardará antes de reutilizar su memoria. Si falta espacio, se podrá volver a la aplicación activa.
 - Cada sesión guardará las regiones de Bank 1 que usa la aplicación y el contexto para reanudarla. Para la primera prueba con `EDIT`, se propone copiar `$1000–$BFFF` (44 KiB), que incluye código, datos, BSS, pila de C y documento, y preservar la página cero de CC65, la pila del procesador y el mapa de memoria. El `.swp` prescindirá de la memoria VDC. Al reanudarse, `EDIT` invalidará su caché de pantalla y repintará la vista completa con el cursor y el desplazamiento guardados. El intérprete conservará su propia continuación y su unidad activa.
 - En la primera versión, el punto de suspensión requerirá que la aplicación haya cerrado sus canales de disco. Si hay una operación en curso, la suspensión podrá esperar a que termine y se cierren los canales.
 
 ## Plataforma y arranque del prototipo actual
 
 - Desarrollar para Commodore 128 en modo nativo, con CC65 (`-t c128`), C para el intérprete y ca65 para el arranque de aplicaciones. La consola usa el VDC de 80 columnas y las rutinas de pantalla, teclado y disco de CC65/KERNAL.
-- El artefacto principal es `build/cmd-os.d71` para la 1571 del dispositivo 8. `build.ps1` empaqueta `boot`, `hello.cmd`, `mem.cmd` y `edit.cmd` con `c1541`. `tools/make-boot-sector.ps1` instala y reserva la pista 1, sector 0. El sector carga `BOOT` mediante el KERNAL y salta a `$1C01`. El runtime inicializa las pilas y la BSS sin pasar por BASIC 7.0.
+- El artefacto principal es `build/cmd-os.d71` para la 1571 del dispositivo 8. `build.ps1` empaqueta `boot`, `hello.cmd`, `mem.cmd`, `copy.cmd` y `edit.cmd` con `c1541`. `tools/make-boot-sector.ps1` instala y reserva la pista 1, sector 0. El sector carga `BOOT` mediante el KERNAL y salta a `$1C01`. El runtime inicializa las pilas y la BSS sin pasar por BASIC 7.0.
 - La MMU deja visible la RAM en `$4000–$BFFF` y conserva el KERNAL, el editor de pantalla y la E/S. CMD-OS selecciona el VDC de 80 columnas, desactiva la salida de 40 columnas y activa el modo de 2 MHz.
 - `run-vice.ps1` monta la imagen con `x128`. Los scripts apuntan a rutas de CC65 y VICE en `D:`. `boot.cmd` es otro lanzador de VICE con rutas absolutas y un disco adicional en el dispositivo 9.
 
@@ -36,7 +38,10 @@ Medir por separado la carga de BOOT y la lectura desde RUN y EDIT en unidades qu
 | `nombre[.cmd]` | Si no es un comando interno, busca una coincidencia exacta con el nombre de un archivo `.cmd` en la unidad activa y utiliza el mismo cargador que `RUN`. |
 | `HELP`, `VER` | Muestran los comandos y la versión. |
 | `EXIT` | Muestra «Ya podés apagar el equipo» y espera el apagado manual. |
-| `M:` | Informa que la unidad está reservada para un futuro disco virtual. |
+| `M:` | Selecciona el volumen REU montado. |
+| `FORMAT M:` | Inicializa el volumen tras pedir confirmación. |
+| `COPY origen destino`, `DEL nombre` | Copia con unidades explícitas y borra en la unidad activa. |
+| `STATUS` | Muestra el último código de salida CMDP. |
 
 La comparación de comandos ignora diferencias entre las letras ASCII minúsculas y mayúsculas. Mantener el flujo de vuelta al prompt tras cada operación, incluidos los errores de disco o formato. Conservar el tratamiento PETSCII al imprimir nombres del disco y `\r\n` en las salidas de la consola.
 
@@ -67,6 +72,8 @@ La paleta estándar vive en `src/kernel/tui.h`. Usa el cian sobre negro de BASIC
 
 ### Regla general de los diálogos de archivo
 
+Los nombres de archivo distinguen mayúsculas de minúsculas. CMD-OS usa minúsculas en los nombres que genera y conserva las mayúsculas que escribe el operador. Cada nombre admite hasta 16 caracteres PETSCII y solo puede contener letras de A a Z, dígitos, guiones y guiones bajos. Un único punto opcional separa el nombre de la extensión, con texto a ambos lados. Los espacios y las comillas se rechazan. En `RUN` y al ejecutar un CMDP por su nombre, el primer espacio separa el nombre del programa de sus argumentos. Si se omite la extensión, se agrega `.cmd` en minúsculas.
+
 Hasta nuevo aviso, en todo CMD-OS, Enter con el nombre vacío abre el selector de la unidad activa, filtrado al tipo que corresponda a la operación. Las flechas arriba y abajo recorren la lista y Enter elige el archivo. Esc cancela desde el campo de nombre, el selector o un diálogo de confirmación. Un nombre ya escrito o sugerido se acepta con Enter. El editor utiliza el servicio común `TUI_PICK_FILE` con el filtro SEQ. Al elegir un archivo distinto del actual como destino de guardado, el editor pide confirmar su reemplazo.
 
 El editor lee archivos SEQ de la unidad activa, acepta finales CR, LF o CRLF y guarda en PETSCII con final CR. El límite de 34 KiB corresponde al documento una vez normalizados los saltos de línea. El diálogo de guardado propone el nombre actual. Para reemplazarlo, el editor escribe y cierra `cmdos-edit.tmp`, conserva el original como `cmdos-edit.bak` durante el cambio de nombre y limpia el respaldo después de confirmar la operación. La unidad debe tener espacio para el temporal. El editor redibuja solo los caracteres que cambiaron y, en las ediciones que conservan el ajuste de línea, evita recorrer todo el documento visible.
@@ -81,7 +88,7 @@ Para los comandos externos por lotes, el intérprete deberá pasar argumentos y 
 
 `src/apps/hello.c` valida el flujo mínimo. Usa `cputs` y `cgetc` sobre la consola que el intérprete ya abrió, espera una tecla y sale de `main`. El programa trae rutinas de CC65 enlazadas en su propio binario. El servicio compartido que demuestra es la consola del C128. Las llamadas a la futura API del kernel de CMD-OS quedan por implementar. La salida de `HELLO` permanece visible al volver al prompt.
 
-El runtime de la aplicación (`src/runtime/cmdos-app-crt0.s`) selecciona el mapa CC65 de Bank 0, guarda la página cero usada por CC65 e inicializa la BSS y su propia pila de C antes de llamar a `main`. Al salir, restaura esa porción de página cero (incluido el puntero a la pila de C del intérprete), el puntero de la pila del procesador, `INIT_STATUS` y el mapa MMU. Escribe el valor de salida en `STATUS` y vuelve con `RTS`. El intérprete no consume ese valor. Es un contrato de ejecución cooperativa de código nativo. La página cero se reutiliza por turnos, la pila de C de la aplicación tiene su propio espacio y la pila del procesador conserva la cadena de llamadas.
+El runtime de la aplicación (`src/runtime/cmdos-app-crt0.s`) selecciona el mapa CC65 de Bank 0, guarda la página cero usada por CC65 e inicializa la BSS y su propia pila de C antes de llamar a `main`. Al salir, restaura esa porción de página cero (incluido el puntero a la pila de C del intérprete), el puntero de la pila del procesador, `INIT_STATUS` y el mapa MMU. Escribe el valor de salida en `STATUS` y vuelve con `RTS`. El intérprete recoge el resultado devuelto por la aplicación y lo muestra con `STATUS`. Es un contrato de ejecución cooperativa de código nativo. La página cero se reutiliza por turnos, la pila de C de la aplicación tiene su propio espacio y la pila del procesador conserva la cadena de llamadas.
 
 ### Mapa efectivo y límites de Bank 0
 
@@ -89,14 +96,35 @@ El runtime de la aplicación (`src/runtime/cmdos-app-crt0.s`) selecciona el mapa
 | --- | --- |
 | `$0002–$001B` | Reserva del enlazador para la página cero de CC65. El runtime guarda y restaura los bytes de trabajo de CC65. |
 | `$1C01–$4F24` | Desde la entrada nativa hasta el final de la BSS en la compilación revisada. La dirección final depende del build. |
-| Fin de CMD-OS hasta `$4FFF` | Margen para el crecimiento del kernel y del intérprete. |
-| `$5000–$AFFF` | Área de enlace de aplicaciones de 24 KiB para código, datos y reservas en RAM, incluidas INIT y BSS. |
+| Fin de CMD-OS hasta `$6FFF` | Margen para el crecimiento del kernel y del intérprete. |
+| `$7000–$AFFF` | Área de enlace de aplicaciones de 16 KiB para código, datos, INIT y BSS. |
 | `$B000–$B7FF` | Reserva para la pila de C de la aplicación, que crece hacia abajo desde `$B800`. |
 | `$B800–$BFFF` | Reserva de la pila de C del intérprete con la configuración estándar instalada de CC65. |
 
-El enlazador, el empaquetador y el cargador aplican `$B000` como límite exclusivo del área CMDP de Bank 0. La cabecera declara los bytes en disco. El enlazador comprueba también `INIT`, `BSS` y el límite inferior de la pila de C de la aplicación. El runtime inicia esa pila en `$B800`, en RAM visible con el mapa CC65. El build verifica que los segmentos residentes terminen antes de `$5000`. `run mem` muestra los segmentos de `boot.map`, las reservas y el margen para ampliar CMD-OS. La imagen incorpora `hello.cmd` y `mem.cmd` recompilados para la nueva dirección de carga.
+El enlazador, el empaquetador y el cargador aplican `$B000` como límite exclusivo del área CMDP de Bank 0. La cabecera declara los bytes en disco. El enlazador comprueba también `INIT`, `BSS` y el límite inferior de la pila de C de la aplicación. El runtime inicia esa pila en `$B800`, en RAM visible con el mapa CC65. El build verifica que los segmentos residentes terminen antes de `$7000`. `run mem` muestra los segmentos de `boot.map`, las reservas y el margen para ampliar CMD-OS. La imagen incorpora `hello.cmd` y `mem.cmd` recompilados para la nueva dirección de carga.
 
 En Bank 1 se mantiene la misma idea de área temporal. Lo que cambia es el banco en que viven el código y los datos de la aplicación. El intercambio con el kernel debe especificar a qué banco pertenece cada búfer, ya que una misma dirección puede referirse a RAM distinta al cambiar el mapa. La reserva para `M:` deberá formar parte del mismo presupuesto de memoria para preservar su contenido entre ejecuciones.
+
+### Estado confirmado de M: y memoria
+
+El arranque informa la VRAM del VDC y detecta la REU. `M:` usa una REU
+de 16 MiB y el formato v2 con 16 ranuras de 64 KiB. Cada archivo admite
+hasta 65.535 bytes. `DIR` muestra el tamaño real, el tipo IEC y los totales
+asignado y libre por ranuras. `COPY` admite PRG, SEQ y USR entre IEC y
+`M:`, con unidades explícitas y sin sobreescribir el destino. El intérprete
+carga `copy.cmd` desde la unidad 8. `EDIT` abre y guarda documentos SEQ
+en la unidad activa y usa un temporal y un respaldo al reemplazar.
+
+La ABI 2 entrega argumentos PETSCII y devuelve el código de salida.
+`EDIT` usa los servicios TUI de disco y `COPY` la tabla residente de Bank 0.
+Queda pendiente unificar ambas interfaces en una API multicanal.
+
+El kernel puede crecer hasta `$6FFF`. Los CMDP Bank 0 enlazados para
+`$5000` deben recompilarse para `$7000`. CMD-OS usa `$0400–$05F6`
+del VIC-II para respaldar el área común y 36 celdas de 4 bits en
+`$D800–$D823` para respaldar 18 bytes de las teclas de función. En la
+compilación confirmada, `MEM` muestra 33,58 KiB asignados y 7,94 KiB
+libres para ampliar CMD-OS. La RAM de color se informa por separado.
 
 ### Cabecera CMDP v1
 
@@ -109,10 +137,10 @@ Comparar la firma como bytes fijos. Los literales de caracteres de CC65 para C12
 | `00–03` | Firma | Bytes `43 4D 44 50` (`CMDP`). |
 | `04` | Versión del formato | `01`. |
 | `05` | Bancos | `01` para Bank 0, `02` para Bank 1 y `03` para ambos. `03` se ejecuta en Bank 0. |
-| `06–07` | Dirección de carga | `$5000` para Bank 0 y `$1000` para Bank 1. |
+| `06–07` | Dirección de carga | `$7000` para Bank 0 y `$1000` para Bank 1. |
 | `08–09` | Desplazamiento de entrada | Relativo a la dirección de carga. El empaquetador escribe cero. El cargador exige que esté dentro del contenido. |
-| `0A–0B` | Tamaño en bytes | Se exige una lectura completa y un máximo de `$6000` bytes para Bank 0 o `$2400` para Bank 1. |
-| `0C` | Versión de API solicitada | Bank 0 acepta `0` y `1`. El cargador exige `2` para Bank 1. |
+| `0A–0B` | Tamaño en bytes | Se exige una lectura completa y un máximo de `$4000` bytes para Bank 0 o `$2400` para Bank 1. |
+| `0C` | Versión de API solicitada | Bank 0 acepta `0`, `1` y `2`. El cargador exige `2` para Bank 1. |
 | `0D–0F` | Reservados | El empaquetador escribe ceros. |
 
 El enlazador reserva por defecto `$0800` bytes para la pila de C bajo `$B800`. Los segmentos de la aplicación, incluidas BSS e INIT, deben caber debajo de `$B000`.
@@ -158,7 +186,7 @@ La imagen D71 y los demás resultados compilados se regeneran con `build.ps1`, p
 .\run-vice.ps1
 ```
 
-Adaptar las rutas a la instalación de cada equipo. La comprobación básica usa `dir`, `run hello`, `run mem` y `run edit`. Escribir en minúsculas los nombres de los archivos tal como figuran en el disco. Quedan pendientes el préstamo de recursos, los argumentos y códigos de salida de aplicaciones, los archivos por lotes y el disco virtual `M:`.
+Adaptar las rutas a la instalación de cada equipo. La comprobación básica usa `dir`, `run hello`, `run mem` y `run edit`. Escribir en minúsculas los nombres de los archivos tal como figuran en el disco. Quedan pendientes el préstamo de recursos entre bancos, los lotes y la suspensión de sesiones en `M:`.
 
 ## Orden de evolución propuesto
 
@@ -167,4 +195,4 @@ Adaptar las rutas a la instalación de cada equipo. La comprobación básica usa
 3. Adaptar las aplicaciones de Bank 0 a los servicios comunes y acordar una ABI para compartir recursos entre bancos.
 4. Probar el uso de la ventana temporal de Bank 0 para recursos de una aplicación Bank 1 y la reutilización de esa misma ventana por una aplicación Bank 0 después del retorno.
 5. Pasar argumentos y devolver códigos de salida. Validar una secuencia de comandos externos que conserve el estado del intérprete entre ejecuciones.
-6. Implementar el volumen privado `M:` sobre REU e incorporarlo a `DIR`, `RUN` y los servicios de archivos de CMD-OS. Probar la suspensión y reanudación alternada de dos sesiones de `EDIT` con documentos sin guardar. Agregar el controlador opcional para NeoRAM Remix sobre el mismo formato.
+6. Ampliar el volumen privado `M:` para guardar sesiones. Probar la suspensión y reanudación alternada de dos sesiones de `EDIT` con documentos sin guardar. Agregar el controlador opcional para NeoRAM Remix sobre el mismo formato.
