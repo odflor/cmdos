@@ -10,22 +10,23 @@
 #define C128_TAB 0x09
 #define CTRL_Y 0x19
 #define MENU_WIDTH 30
-#define MENU_X ((TUI_WIDTH - MENU_WIDTH) / 2)
+#define MENU_X ((KRNL_TUI_WIDTH - MENU_WIDTH) / 2)
+#define SESSION_DISCARD 253
 #define SESSION_CANCEL 254
 #define SESSION_SHELL 255
 
 static const char digits[] = "0123456789abcdef";
 static unsigned char pending_target;
 
-unsigned char cmdosk_session_hotkey(unsigned char key)
+unsigned char krnl_session_hotkey(unsigned char key)
 {
     return key == CTRL_Y || (key == C128_TAB && (SHIFT_FLAGS & C128_ALT));
 }
 
 static void swap_message(const char* message)
 {
-    tui_box(MENU_X, 10, MENU_WIDTH, 3, TUI_POPUP);
-    tui_text_span(MENU_X + 1, 11, MENU_WIDTH - 2, TUI_POPUP,
+    krnl_tui_box(MENU_X, 10, MENU_WIDTH, 3, KRNL_TUI_POPUP);
+    krnl_tui_text_span(MENU_X + 1, 11, MENU_WIDTH - 2, KRNL_TUI_POPUP,
                   (const unsigned char*)message);
 }
 
@@ -33,21 +34,42 @@ static void swap_error(const char* reason)
 {
     const unsigned char x = 15, width = 50;
 
-    tui_box(x, 9, width, 5, TUI_POPUP);
-    tui_text_span(x + 1, 10, width - 2, TUI_POPUP | 0x80,
-                  (const unsigned char*)" No se pudo suspender la sesion");
-    tui_text_span(x + 1, 11, width - 2, TUI_POPUP,
+    krnl_tui_box(x, 9, width, 5, KRNL_TUI_POPUP);
+    krnl_tui_text_span(x + 1, 10, width - 2, KRNL_TUI_POPUP | 0x80,
+                  (const unsigned char*)" No se pudo cambiar de sesion");
+    krnl_tui_text_span(x + 1, 11, width - 2, KRNL_TUI_POPUP,
                   (const unsigned char*)reason);
-    tui_text_span(x + 1, 12, width - 2, TUI_POPUP,
+    krnl_tui_text_span(x + 1, 12, width - 2, KRNL_TUI_POPUP,
                   (const unsigned char*)" Pulse una tecla para volver");
     cgetc();
 }
 
-static unsigned char choose_session(unsigned char from_app)
+static unsigned char session_disk_busy(void)
 {
-    unsigned char targets[17];
+    if (!krnl_disk_busy()) return 0;
+    swap_error(" Cierre los canales de disco abiertos.");
+    return 1;
+}
+
+static unsigned char session_entry(unsigned char slot)
+{
+    krnl_reu_dir_read(slot);
+    return *reu_dir_name && reu_dir_type == KRNL_SWAP_TYPE;
+}
+
+static void remove_session(unsigned char slot)
+{
+    *reu_dir_name = 0;
+    reu_buffer = reu_dir_name;
+    reu_length = 1;
+    krnl_reu_write_entry(slot);
+}
+
+static unsigned char choose_session(unsigned char from_app, unsigned char discard)
+{
+    unsigned char targets[18];
     unsigned char slot, count = 0;
-    char* label = (char*)TUI_REQUEST.data + 3;
+    char* label = (char*)KRNL_REQUEST.data + 3;
 
     if (from_app) {
         targets[count++] = SESSION_SHELL;
@@ -55,31 +77,91 @@ static unsigned char choose_session(unsigned char from_app)
         label += 11;
     }
     for (slot = 0; slot < 16; ++slot) {
-        reu_dir_read(slot);
-        if (!*reu_dir_name || reu_dir_type != CMDOSK_SWAP_TYPE) continue;
+        if (!session_entry(slot) ||
+            (!discard && !krnl_swap_available(slot, KRNL_CONTEXT_SIZE))) continue;
         targets[count++] = slot;
-        memcpy(label, "EDIT 0", 7);
-        label[5] = reu_dir_name[6];
-        label += 7;
+        memcpy(label, "EDIT0", 6);
+        label[4] = reu_dir_name[6];
+        label += 6;
+    }
+    if (!discard) {
+        targets[count++] = SESSION_DISCARD;
+        memcpy(label, "Descartar", 10);
+        label += 10;
     }
     if (!count) {
         cputs("Sin sesiones.\r\n");
         return SESSION_CANCEL;
     }
 
-    TUI_REQUEST.data[0] = 1;
-    TUI_REQUEST.data[1] = MENU_X;
-    TUI_REQUEST.data[2] = count;
-    TUI_REQUEST.count = (unsigned char)(label - (char*)TUI_REQUEST.data);
-    TUI_REQUEST.y = (24 - count - 2) / 2;
-    TUI_REQUEST.style = MENU_WIDTH;
-    TUI_REQUEST.result = 0;
-    cmdosk_menu();
-    if (!TUI_REQUEST.result || TUI_REQUEST.result > count) return SESSION_CANCEL;
-    return targets[TUI_REQUEST.result - 1];
+    KRNL_REQUEST.data[0] = 1;
+    KRNL_REQUEST.data[1] = MENU_X;
+    KRNL_REQUEST.data[2] = count;
+    KRNL_REQUEST.count = (unsigned char)(label - (char*)KRNL_REQUEST.data);
+    KRNL_REQUEST.y = (24 - count - 2) / 2;
+    KRNL_REQUEST.style = MENU_WIDTH;
+    KRNL_REQUEST.result = 0;
+    krnl_tui_menu();
+    if (!KRNL_REQUEST.result || KRNL_REQUEST.result > count) return SESSION_CANCEL;
+    return targets[KRNL_REQUEST.result - 1];
 }
 
-void cmdosk_session_suspend(void)
+static unsigned char confirm(void)
+{
+    unsigned char key;
+
+    do {
+        key = cgetc();
+    } while (key != 's' && key != 'S' && key != 'n' && key != 'N' && key != CH_ESC);
+    return key == 's' || key == 'S';
+}
+
+static unsigned char select_session(unsigned char from_app)
+{
+    unsigned char slot = choose_session(from_app, 0);
+
+    if (slot != SESSION_DISCARD) return slot;
+    slot = choose_session(0, 1);
+    if (slot < 16 && session_entry(slot)) {
+        swap_message("Descartar sesion? S/N/Esc");
+        if (confirm()) remove_session(slot);
+    }
+    return SESSION_CANCEL;
+}
+
+void krnl_session_boot_notice(void)
+{
+    unsigned char slot;
+
+    if (!mounted) return;
+    for (slot = 0; slot < 16; ++slot) {
+        if (session_entry(slot) && krnl_swap_available(slot, KRNL_CONTEXT_SIZE)) {
+            cputs("Sesiones en M:. Use Alt+Tab.\r\n");
+            return;
+        }
+    }
+}
+
+unsigned char krnl_session_confirm_exit(void)
+{
+    unsigned char slot, found = 0;
+
+    if (!mounted) return 1;
+    for (slot = 0; slot < 16; ++slot) {
+        if (!session_entry(slot)) continue;
+        if (!found) cputs("Sesiones suspendidas en M:\r\n");
+        found = 1;
+        cputs(reu_dir_name);
+        cputs("\r\n");
+    }
+    if (!found) return 1;
+    cputs("Se pierden si la REU no se conserva.\r\nApagar? S/N/Esc ");
+    found = confirm();
+    cputs("\r\n");
+    return found;
+}
+
+void krnl_session_suspend(void)
 {
     char name[] = "sesion0.swp";
     unsigned char i, target;
@@ -89,22 +171,21 @@ void cmdosk_session_suspend(void)
                                      : " M: requiere una REU de 16 MiB.");
         return;
     }
-    if (mounted && !cmdosk_disk_busy()) {
-        target = choose_session(1);
-        if (target == SESSION_CANCEL) return;
-        for (i = 0; i < 16; ++i) {
-            name[6] = digits[i];
-            if (!reu_find(name)) {
-                swap_message("Guardando sesion en REU...");
-                bank1_capture_context();
-                cmdosk_context[CMDOSK_CONTEXT_DEVICE] = TUI_REQUEST.device;
-                if (!cmdosk_swap_save(name, cmdosk_context, CMDOSK_CONTEXT_SIZE)) {
-                    pending_target = target;
-                    bank1_suspend_pending = 1;
-                    return;
-                }
-                break;
+    if (session_disk_busy()) return;
+    target = select_session(1);
+    if (target == SESSION_CANCEL) return;
+    for (i = 0; i < 16; ++i) {
+        name[6] = digits[i];
+        if (!krnl_reu_find(name)) {
+            swap_message("Guardando sesion en REU...");
+            krnl_bank1_capture_context();
+            cmdosk_context[KRNL_CONTEXT_DEVICE] = KRNL_REQUEST.device;
+            if (!krnl_swap_save(name, cmdosk_context, KRNL_CONTEXT_SIZE)) {
+                pending_target = target;
+                bank1_suspend_pending = 1;
+                return;
             }
+            break;
         }
     }
     swap_error(" Compruebe los archivos y el espacio de M:.");
@@ -115,48 +196,45 @@ static void resume_session(unsigned char slot)
     unsigned char device;
     char name[17];
 
-    if (slot >= 16) return;
-    reu_dir_read(slot);
-    if (!*reu_dir_name || reu_dir_type != CMDOSK_SWAP_TYPE) return;
+    if (slot >= 16 || session_disk_busy()) return;
+    krnl_reu_dir_read(slot);
+    if (!*reu_dir_name || reu_dir_type != KRNL_SWAP_TYPE) return;
     strcpy(name, reu_dir_name);
     swap_message("Cargando sesion de REU...");
 
-    bank1_prepare(8);
-    if (cmdosk_swap_restore(name, cmdosk_context, CMDOSK_CONTEXT_SIZE) ||
+    krnl_bank1_prepare(8);
+    if (krnl_swap_restore(name, cmdosk_context, KRNL_CONTEXT_SIZE) ||
         cmdosk_context[1] != 0x4e) {
-        bank1_finish();
-        tui_reset();
+        krnl_bank1_finish();
+        krnl_tui_reset();
         cputs("Sesion invalida o incompatible.\r\n");
         return;
     }
-    device = cmdosk_context[CMDOSK_CONTEXT_DEVICE];
+    device = cmdosk_context[KRNL_CONTEXT_DEVICE];
     if (device && (device < 8 || device > 11)) {
-        bank1_finish();
-        tui_reset();
+        krnl_bank1_finish();
+        krnl_tui_reset();
         cputs("Sesion invalida o incompatible.\r\n");
         return;
     }
-    /* The running session has no directory entry until suspended again. */
-    *reu_dir_name = 0;
-    reu_buffer = reu_dir_name;
-    reu_length = 1;
-    reu_write_entry(slot);
-    TUI_REQUEST.device = device;
-    TUI_REQUEST.result = TUI_SESSION_RESUMED;
-    tui_editor_keys(1);
-    bank1_resume();
-    tui_editor_keys(0);
-    bank1_finish();
-    tui_reset();
+    remove_session(slot);
+    KRNL_REQUEST.device = device;
+    KRNL_REQUEST.count = KRNL_SESSION_RESUMED;
+    krnl_keyboard_editor_keys(1);
+    krnl_bank1_resume();
+    krnl_keyboard_editor_keys(0);
+    krnl_bank1_finish();
+    krnl_tui_reset();
 }
 
-void cmdosk_session_menu(void)
+void krnl_session_menu(void)
 {
-    if (mounted) resume_session(choose_session(0));
+    if (session_disk_busy()) return;
+    if (mounted) resume_session(select_session(0));
     else cputs("Sesiones: M: sin montar.\r\n");
 }
 
-void cmdosk_session_switch_pending(void)
+void krnl_session_switch_pending(void)
 {
     resume_session(pending_target);
 }

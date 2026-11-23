@@ -11,7 +11,7 @@
         .import         RESTOR, BSOUT, CLRCH
         .import         __APP_STACK_TOP__, __STACK_START__
 
-        .assert __STACK_START__ >= $B000, lderror, "CMD-OS app stack exceeds its RAM reservation"
+        .assert __STACK_START__ >= $B400, lderror, "CMD-OS app stack exceeds its RAM reservation"
 
         .include        "zeropage.inc"
         .include        "c128.inc"

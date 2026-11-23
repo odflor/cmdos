@@ -1,4 +1,4 @@
-.export _cmdosk_bind_help
+.export _krnl_keyboard_bind_help
 
 ; PFKEY takes the address of a three-byte pointer in zero page.
 PFKEY = $ff65
@@ -8,7 +8,7 @@ key_pointer = $fa
 help_key: .byte $84
 
 .code
-_cmdosk_bind_help:
+_krnl_keyboard_bind_help:
         lda #<help_key
         sta key_pointer
         lda #>help_key

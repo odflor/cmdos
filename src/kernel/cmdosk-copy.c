@@ -3,18 +3,15 @@
 #include "cmdosk-internal.h"
 #include "filename.h"
 #include "reu.h"
-#include "cmdosk-swap.h"
 
 #define SRC_LFN 2
-#define DST_LFN 3
-#define STATUS_LFN 15
 
 typedef struct {
     unsigned char device;
     const char* name;
 } Path;
 
-static unsigned char buffer[TUI_TRANSFER];
+static unsigned char buffer[KRNL_BUFFER_SIZE];
 
 static unsigned char valid_device(unsigned char device)
 {
@@ -30,7 +27,7 @@ static int lookup_iec(const Path* path, unsigned char* type)
 
     if (cbm_opendir(SRC_LFN, path->device)) return -1;
     while ((result = cbm_readdir(SRC_LFN, &entry)) == 0) {
-        entry.name[CMDOS_FILENAME_MAX] = 0;
+        entry.name[KRNL_FILENAME_MAX] = 0;
         if (entry.type != CBM_T_HEADER && strcmp(entry.name, path->name) == 0) {
             *type = entry.type;
             found = 1;
@@ -41,138 +38,66 @@ static int lookup_iec(const Path* path, unsigned char* type)
     return found || result == 2 ? found : -1;
 }
 
-static void iec_name(char* request, const char* name, char type, char mode)
-{
-    char suffix[] = ",p,r";
-    suffix[1] = type;
-    suffix[3] = mode;
-    strcpy(request, "0:");
-    strcat(request, name);
-    strcat(request, suffix);
-}
-
-static void transfer(unsigned char slot, unsigned int offset,
-                     unsigned char count, unsigned char operation)
-{
-    reu_buffer = buffer;
-    reu_position = offset;
-    reu_offset[2] = slot;
-    reu_length = count;
-    reu_transfer(operation);
-}
-
-void cmdosk_copy(void)
+void krnl_disk_copy(void)
 {
     Path src, dst;
-    char request[24];
-    char kind = 'p';
-    unsigned char src_slot = 0, dst_slot = 0, type, status, ignored;
-    unsigned char src_open = 0, dst_open = 0, status_open = 0, created = 0;
-    unsigned int remaining = 0;
-    unsigned long copied = 0;
-    unsigned char ok = 0;
+    char request[20];
+    unsigned char type, ignored, src_handle, dst_handle, status;
     int count;
 
-    TUI_REQUEST.result = TUI_COPY_INVALID;
-    src.device = TUI_REQUEST.x;
-    dst.device = TUI_REQUEST.y;
-    src.name = (char*)TUI_REQUEST.data;
-    dst.name = src.name + TUI_COPY_DESTINATION;
-    TUI_REQUEST.data[16] = 0;
-    TUI_REQUEST.data[TUI_COPY_DESTINATION + 16] = 0;
+    KRNL_REQUEST.result = KRNL_COPY_INVALID;
+    src.device = KRNL_REQUEST.x;
+    dst.device = KRNL_REQUEST.y;
+    src.name = (char*)KRNL_REQUEST.data;
+    dst.name = src.name + KRNL_COPY_DESTINATION;
+    KRNL_REQUEST.data[16] = 0;
+    KRNL_REQUEST.data[KRNL_COPY_DESTINATION + 16] = 0;
     if (!valid_device(src.device) || !valid_device(dst.device) ||
-        !valid_filename(src.name) || !valid_filename(dst.name)) return;
+        !krnl_valid_filename(src.name) || !krnl_valid_filename(dst.name)) return;
 
     if ((!src.device || !dst.device) && !mounted) {
-        TUI_REQUEST.result = TUI_COPY_UNMOUNTED;
+        KRNL_REQUEST.result = KRNL_COPY_UNMOUNTED;
         return;
     }
+    KRNL_REQUEST.result = KRNL_COPY_SOURCE;
     if (src.device) {
-        if (lookup_iec(&src, &type) != 1) goto source_error;
+        if (lookup_iec(&src, &type) != 1) return;
     } else {
-        src_slot = reu_find(src.name);
-        if (!src_slot) goto source_error;
-        remaining = reu_dir_size;
+        if (!krnl_reu_find(src.name)) return;
         type = reu_dir_type;
     }
-    if (type == CMDOSK_SWAP_TYPE) {
-        TUI_REQUEST.result = TUI_COPY_TYPE;
+    KRNL_REQUEST.result = KRNL_COPY_TYPE;
+    if (type != CBM_T_PRG && type != CBM_T_SEQ && type != CBM_T_USR) return;
+    KRNL_REQUEST.result = KRNL_COPY_DEST;
+    if (dst.device && lookup_iec(&dst, &ignored) != 0) return;
+
+    KRNL_REQUEST.result = KRNL_COPY_SOURCE;
+    src_handle = krnl_file_open(src.device, src.name, type, 0, &status);
+    if (!src_handle) return;
+    dst_handle = krnl_file_open(dst.device, dst.name, type, 1, &status);
+    if (!dst_handle) {
+        krnl_file_close(src_handle, 0);
+        KRNL_REQUEST.result = KRNL_COPY_DEST;
         return;
-    }
-    if (type == CBM_T_SEQ) kind = 's';
-    else if (type == CBM_T_USR) kind = 'u';
-    else if (type != CBM_T_PRG && (src.device || dst.device)) {
-        TUI_REQUEST.result = TUI_COPY_TYPE;
-        return;
-    }
-    if (dst.device) {
-        if (lookup_iec(&dst, &ignored) != 0) goto destination_error;
-    } else {
-        if (reu_find(dst.name) || !(dst_slot = reu_find("")))
-            goto destination_error;
     }
 
-    if (src.device) {
-        iec_name(request, src.name, kind, 'r');
-        if (cbm_open(SRC_LFN, src.device, SRC_LFN, request)) goto done;
-        src_open = 1;
-    }
-    if (dst.device) {
-        if (cbm_open(STATUS_LFN, dst.device, 15, "")) goto done;
-        status_open = 1;
-        iec_name(request, dst.name, kind, 'w');
-        if (cbm_open(DST_LFN, dst.device, DST_LFN, request)) goto done;
-        dst_open = 1;
-        if (cmdosk_disk_status()) goto done;
-        created = 1;
-    }
-    for (;;) {
-        status = 0;
-        if (src.device) {
-            count = cbm_read(SRC_LFN, buffer, sizeof(buffer));
-            status = cbm_k_readst();
-            if (count < 0 || (status & 0xbf)) goto done;
-        } else {
-            count = remaining > sizeof(buffer) ? sizeof(buffer) : remaining;
-            transfer(src_slot, (unsigned int)copied, count, 0x91);
-            remaining -= count;
+    while ((count = krnl_file_transfer(src_handle, buffer, sizeof(buffer), 0)) > 0) {
+        if (krnl_file_transfer(dst_handle, buffer, count, 1) != count) {
+            count = -1;
+            break;
         }
-        if (!count) break;
-        if (dst.device) {
-            if (cbm_write(DST_LFN, buffer, count) != count || cbm_k_readst()) goto done;
-        } else {
-            if (copied + count > 65535ul) goto done;
-            transfer(dst_slot, (unsigned int)copied, count, 0x90);
-        }
-        copied += count;
-        if (status & 0x40) break;
     }
-    ok = 1;
-
-done:
-    if (src_open) cbm_close(SRC_LFN);
-    if (dst_open) cbm_close(DST_LFN);
-    if (status_open) {
-        if (cmdosk_disk_status()) ok = 0;
-        cbm_close(STATUS_LFN);
-    }
-    if (ok) {
-        if (!dst.device) cmdosk_reu_publish(dst_slot, dst.name, (unsigned int)copied, type);
-        TUI_REQUEST.result = TUI_COPY_OK;
+    krnl_file_close(src_handle, 0);
+    status = krnl_file_close(dst_handle, count < 0);
+    if (!status && count == 0) {
+        KRNL_REQUEST.result = KRNL_COPY_OK;
         return;
     }
-    TUI_REQUEST.result = TUI_COPY_IO;
-    if (created) {
+    KRNL_REQUEST.result = KRNL_COPY_IO;
+    if (dst.device) {
         strcpy(request, "s0:");
         strcat(request, dst.name);
-        if (cmdosk_disk_command(dst.device, request) != 1)
-            TUI_REQUEST.result = TUI_COPY_PARTIAL;
+        if (krnl_disk_send_command(dst.device, request) != 1)
+            KRNL_REQUEST.result = KRNL_COPY_PARTIAL;
     }
-    return;
-
-source_error:
-    TUI_REQUEST.result = TUI_COPY_SOURCE;
-    return;
-destination_error:
-    TUI_REQUEST.result = TUI_COPY_DEST;
 }

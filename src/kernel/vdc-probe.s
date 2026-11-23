@@ -1,4 +1,4 @@
-.export _vdc_vram_kib
+.export _krnl_vdc_vram_kib
 
 .bss
 original_low: .res 1
@@ -6,7 +6,7 @@ original_high: .res 1
 marker_readback: .res 1
 
 .code
-_vdc_vram_kib:
+_krnl_vdc_vram_kib:
         php
         sei
         ldx #18

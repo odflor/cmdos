@@ -1,16 +1,16 @@
 #include <conio.h>
 #include "cmdosk-internal.h"
 
-void tui_reset(void)
+void krnl_tui_reset(void)
 {
     revers(0);
     cursor(1);
-    bgcolor(TUI_BACKGROUND);
-    textcolor(TUI_TEXT);
+    bgcolor(KRNL_TUI_BACKGROUND);
+    textcolor(KRNL_TUI_TEXT);
     clrscr();
 }
 
-void tui_text_span(unsigned char x, unsigned char y, unsigned char width,
+void krnl_tui_text_span(unsigned char x, unsigned char y, unsigned char width,
                       unsigned char style, const unsigned char* text)
 {
     gotoxy(x, y);
@@ -22,7 +22,7 @@ void tui_text_span(unsigned char x, unsigned char y, unsigned char width,
     revers(0);
 }
 
-void tui_box(unsigned char x, unsigned char y, unsigned char width,
+void krnl_tui_box(unsigned char x, unsigned char y, unsigned char width,
                 unsigned char height, unsigned char style)
 {
     unsigned char row;

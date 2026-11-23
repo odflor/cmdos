@@ -1,9 +1,9 @@
 .include "c128.inc"
 .include "zeropage.inc"
 
-.export _bank1_gate, _bank1_gate_size, _bank1_store, _bank1_fetch, _bank1_run
-.export _bank1_capture_context, _bank1_resume, _cmdosk_context, _bank1_suspend_pending
-.import _cmdosk_dispatch
+.export _krnl_bank1_gate, _bank1_gate_size, _krnl_bank1_store, _krnl_bank1_fetch, _krnl_bank1_run
+.export _krnl_bank1_capture_context, _krnl_bank1_resume, _cmdosk_context, _bank1_suspend_pending
+.import _krnl_service_dispatch
 
 gate = $0E00
 target = $0F30
@@ -16,7 +16,7 @@ count = request + 4
 data = request + 7
 bank1 = MMU_CFG_CC65 | $40  ; Same ROM/I/O map, with Bank 1 RAM.
 
-.assert zpspace = 26, error, "Update CMDOSK_CONTEXT_SIZE for this cc65 zero-page layout"
+.assert zpspace = 26, error, "Update KRNL_CONTEXT_SIZE for this cc65 zero-page layout"
 
 .bss
 _cmdosk_context:
@@ -33,25 +33,25 @@ return_x:       .res 1
 
 .segment "CODE"
 
-_bank1_store:
+_krnl_bank1_store:
         sta target
         stx target+1
-        jmp gate+(store-_bank1_gate)
+        jmp gate+(store-_krnl_bank1_gate)
 
-_bank1_run:
+_krnl_bank1_run:
         sta target
         stx target+1
-        jmp gate+(run-_bank1_gate)
+        jmp gate+(run-_krnl_bank1_gate)
 
-_bank1_fetch:
+_krnl_bank1_fetch:
         sta target
         stx target+1
-        jmp gate+(fetch-_bank1_gate)
+        jmp gate+(fetch-_krnl_bank1_gate)
 
-_bank1_resume:
-        jmp gate+(resume-_bank1_gate)
+_krnl_bank1_resume:
+        jmp gate+(resume-_krnl_bank1_gate)
 
-_bank1_capture_context:
+_krnl_bank1_capture_context:
         php
         sei
         lda app_sp
@@ -99,7 +99,7 @@ restore_cpu_byte:
         rts
 
 ; Copied to the common sprite reservation before changing the MMU.
-_bank1_gate:
+_krnl_bank1_gate:
         php
         pha
         txa
@@ -116,7 +116,7 @@ _bank1_gate:
         tax
         pla
         plp
-        jmp _cmdosk_dispatch
+        jmp _krnl_service_dispatch
 from_bank1:
         ; Share hardware stack and zero page, but use the resident C stack
         ; and run ROM interrupts only while Bank 0 is mapped.
@@ -135,7 +135,7 @@ save_app:
         lda #MMU_CFG_CC65
         sta MMU_CR
         cli
-        jsr _cmdosk_dispatch
+        jsr _krnl_service_dispatch
         sei
         lda _bank1_suspend_pending
         bne suspended
@@ -158,7 +158,7 @@ restore_app:
 suspended:
         lda #0
         tax
-        jmp gate+(return_shell-_bank1_gate)
+        jmp gate+(return_shell-_krnl_bank1_gate)
 
 store:
         ; The caller supplies a nonzero chunk fitting the common mailbox.
@@ -212,10 +212,10 @@ run:
         stx shell_sp
         lda #0
         sta _bank1_suspend_pending
-        jsr gate+(save_shell_context-_bank1_gate)
+        jsr gate+(save_shell_context-_krnl_bank1_gate)
         lda #bank1
         sta MMU_CR
-        jsr gate+(entry-_bank1_gate)
+        jsr gate+(entry-_krnl_bank1_gate)
 return_shell:
         sta return_a
         stx return_x
@@ -246,7 +246,7 @@ resume:
         stx shell_sp
         lda #0
         sta _bank1_suspend_pending
-        jsr gate+(save_shell_context-_bank1_gate)
+        jsr gate+(save_shell_context-_krnl_bank1_gate)
         ldx #zpspace-1
 load_app_zp:
         lda context_zp,x
@@ -264,10 +264,10 @@ load_app_stack:
         sta $0100,x
         inx
         bne load_app_stack
-        jmp gate+(resume_app-_bank1_gate)
+        jmp gate+(resume_app-_krnl_bank1_gate)
 entry:
         jmp (target)
 
-_bank1_gate_size = * - _bank1_gate
+_bank1_gate_size = * - _krnl_bank1_gate
 .assert gate + _bank1_gate_size <= target, error, "Bank 1 gate overlaps its state"
 .assert shell_zp + zpspace <= app_zp && app_zp + zpspace <= app_sp && app_map < request, error, "Bank 1 gate state overlaps"

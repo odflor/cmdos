@@ -15,8 +15,8 @@ static void draw_item(const MenuGroup* group, unsigned char row,
     unsigned char i = row;
 
     while (i--) while (*label++) {}
-    tui_text_span(group->x + 1, TUI_REQUEST.y + row + 1, TUI_REQUEST.style - 2,
-                  selected ? TUI_POPUP | 0x80 : TUI_POPUP, label);
+    krnl_tui_text_span(group->x + 1, KRNL_REQUEST.y + row + 1, KRNL_REQUEST.style - 2,
+                  selected ? KRNL_TUI_POPUP | 0x80 : KRNL_TUI_POPUP, label);
 }
 
 static void erase_group(const MenuGroup* group)
@@ -24,22 +24,22 @@ static void erase_group(const MenuGroup* group)
     unsigned char row;
 
     for (row = 0; row < group->count + 2; ++row)
-        tui_text_span(group->x, TUI_REQUEST.y + row, TUI_REQUEST.style,
-                      TUI_TEXT, (const unsigned char*)"");
+        krnl_tui_text_span(group->x, KRNL_REQUEST.y + row, KRNL_REQUEST.style,
+                      KRNL_TUI_TEXT, (const unsigned char*)"");
 }
 
-void cmdosk_menu(void)
+void krnl_tui_menu(void)
 {
     MenuGroup groups[MAX_GROUPS];
     MenuGroup* menu;
-    const unsigned char* next = TUI_REQUEST.data;
-    const unsigned char* end = next + TUI_REQUEST.count;
+    const unsigned char* next = KRNL_REQUEST.data;
+    const unsigned char* end = next + KRNL_REQUEST.count;
     unsigned char group_count, item, first = 1;
     unsigned char index, selected, previous, key;
 
-    if (!TUI_REQUEST.count || TUI_REQUEST.count > TUI_TRANSFER ||
-        TUI_REQUEST.y >= 24 || TUI_REQUEST.style < 3 ||
-        TUI_REQUEST.style > TUI_WIDTH) return;
+    if (!KRNL_REQUEST.count || KRNL_REQUEST.count > KRNL_BUFFER_SIZE ||
+        KRNL_REQUEST.y >= 24 || KRNL_REQUEST.style < 3 ||
+        KRNL_REQUEST.style > KRNL_TUI_WIDTH) return;
     group_count = *next++;
     if (!group_count || group_count > MAX_GROUPS) return;
 
@@ -50,8 +50,8 @@ void cmdosk_menu(void)
         menu->count = *next++;
         menu->first_item = first;
         menu->labels = next;
-        if (!menu->count || menu->x > TUI_WIDTH - TUI_REQUEST.style ||
-            menu->count + 2 > 24 - TUI_REQUEST.y) return;
+        if (!menu->count || menu->x > KRNL_TUI_WIDTH - KRNL_REQUEST.style ||
+            menu->count + 2 > 24 - KRNL_REQUEST.y) return;
         for (item = 0; item < menu->count; ++item) {
             while (next < end && *next) ++next;
             if (next == end) return;
@@ -65,14 +65,14 @@ void cmdosk_menu(void)
     for (;;) {
         menu = &groups[index];
         selected = 0;
-        tui_box(menu->x, TUI_REQUEST.y, TUI_REQUEST.style, menu->count + 2, TUI_POPUP);
+        krnl_tui_box(menu->x, KRNL_REQUEST.y, KRNL_REQUEST.style, menu->count + 2, KRNL_TUI_POPUP);
         for (item = 0; item < menu->count; ++item) draw_item(menu, item, item == selected);
 
         for (;;) {
             key = cgetc();
             if (key == CH_ENTER || key == 10 || key == CH_ESC || key == CH_F7) {
                 if (key == CH_ENTER || key == 10)
-                    TUI_REQUEST.result = menu->first_item + selected;
+                    KRNL_REQUEST.result = menu->first_item + selected;
                 erase_group(menu);
                 return;
             }

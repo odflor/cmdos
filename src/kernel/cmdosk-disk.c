@@ -3,22 +3,30 @@
 #include <string.h>
 #include "cmdosk-internal.h"
 #include "reu.h"
-#include "disk-api.h"
+#include "filename.h"
 
-#define FILE_LFN 4
 #define STATUS_LFN 15
+#define KERNAL_OPEN_FILES (*(volatile unsigned char*)0x98)
+#define KERNAL_FILE_DEVICES ((volatile const unsigned char*)0x036C)
 
-static unsigned char file_open;
-static char reu_write_name[17];
+#define FIRST_LFN 4
+#define CHANNELS 2
+typedef struct {
+    unsigned char mode, device, slot, type;
+    unsigned int position, size;
+    char name[17];
+} Channel;
+
+static Channel channels[CHANNELS];
 
 static void reu_record(unsigned char slot, unsigned char size)
 {
     reu_buffer = reu_dir_name;
     reu_length = size;
-    reu_write_entry(slot - 1);
+    krnl_reu_write_entry(slot - 1);
 }
 
-void cmdosk_reu_publish(unsigned char slot, const char* name,
+void krnl_reu_publish(unsigned char slot, const char* name,
                        unsigned int size, unsigned char type)
 {
     strncpy(reu_dir_name, name, 16);
@@ -34,9 +42,9 @@ static unsigned char reu_disk_command(char* command)
     char* equals;
     unsigned char slot;
 
-    if (file_open || command[1] != '0' || command[2] != ':') return 255;
+    if (command[1] != '0' || command[2] != ':') return 255;
     if (*command == 's') {
-        if (!*name || !(slot = reu_find(name))) return 62;
+        if (!*name || !(slot = krnl_reu_find(name))) return 62;
         *reu_dir_name = 0;
         reu_record(slot, 1);
         return 1;
@@ -44,34 +52,15 @@ static unsigned char reu_disk_command(char* command)
     if (*command != 'r' || !(equals = strchr(name, '=')) ||
         equals[1] != '0' || equals[2] != ':' || !equals[3]) return 255;
     *equals = 0;
-    if (!*name || strlen(name) > 16 || reu_find(name)) return 63;
-    slot = reu_find(equals + 3);
+    if (!*name || strlen(name) > 16 || krnl_reu_find(name)) return 63;
+    slot = krnl_reu_find(equals + 3);
     if (!slot) return 62;
     strncpy(reu_dir_name, name, 16);
     reu_record(slot, 16);
     return 0;
 }
 
-static unsigned char reu_open(char* name, unsigned char write)
-{
-    unsigned char slot;
-    if (!*name || strlen(name) > 16) return 1;
-    slot = reu_find(name);
-    if (write) {
-        if (slot) return 1;
-        slot = reu_find("");
-        if (!slot) return 1;
-        strcpy(reu_write_name, name);
-    } else if (!slot || reu_dir_type != CBM_T_SEQ) {
-        return 1;
-    }
-    reu_offset[2] = slot;
-    reu_position = 0;
-    file_open = write ? 2 : 1;
-    return 0;
-}
-
-unsigned char cmdosk_disk_status(void)
+unsigned char krnl_disk_status(void)
 {
     unsigned char first, second, status = 255;
 
@@ -88,132 +77,204 @@ unsigned char cmdosk_disk_status(void)
     return status;
 }
 
-unsigned char cmdosk_disk_command(unsigned char device, const char* command)
+unsigned char krnl_disk_send_command(unsigned char device, const char* command)
 {
     unsigned char result = 255;
 
-    if (device && !file_open && cbm_open(STATUS_LFN, device, 15, command) == 0) {
-        result = cmdosk_disk_status();
+    if (device && cbm_open(STATUS_LFN, device, 15, command) == 0) {
+        result = krnl_disk_status();
         cbm_k_close(STATUS_LFN);
     }
     return result;
 }
 
-static const struct disk_api disk_api = {
-    cbm_open, cbm_close, cbm_read, cbm_write, cbm_opendir, cbm_readdir,
-    cbm_k_readst, cmdosk_disk_status, reu_dir_read, reu_write_entry, reu_transfer,
-    reu_dir_name, &reu_dir_size, &reu_dir_type, &reu_buffer, &reu_length,
-    &reu_position, reu_offset
-};
-
-void cmdosk_disk_finish(void)
+unsigned char krnl_file_open(unsigned char device, const char* name,
+                             unsigned char type, unsigned char write,
+                             unsigned char* result)
 {
-    if (file_open && TUI_REQUEST.device) {
-        cbm_k_close(FILE_LFN);
-        cbm_k_close(STATUS_LFN);
+    unsigned char i, slot, handle;
+    Channel* ch;
+    char request[24], suffix[] = ",p,r";
+
+    *result = KRNL_DISK_ERROR;
+    if (!krnl_valid_filename(name) || (device && (device < 8 || device > 11))) return 0;
+    for (handle = 0; handle < CHANNELS && channels[handle].mode; ++handle) {}
+    if (handle == CHANNELS) return 0;
+    ch = &channels[handle];
+    if (type == CBM_T_SEQ) suffix[1] = 's';
+    else if (type == CBM_T_USR) suffix[1] = 'u';
+    else if (type != CBM_T_PRG) return 0;
+    if (device) {
+        if (write) suffix[3] = 'w';
+        strcpy(request, "0:");
+        strcat(request, name);
+        strcat(request, suffix);
+        if (cbm_open(STATUS_LFN, device, 15, "") != 0) return 0;
+        i = cbm_open(FIRST_LFN + handle, device, FIRST_LFN + handle, request);
+        *result = krnl_disk_status();
+        cbm_close(STATUS_LFN);
+        if (i || *result) {
+            cbm_close(FIRST_LFN + handle);
+            if (!*result) *result = KRNL_DISK_ERROR;
+            return 0;
+        }
+    } else {
+        if (!mounted) return 0;
+        slot = krnl_reu_find(name);
+        if (write) {
+            if (slot) return 0;
+            for (i = 0; i < CHANNELS; ++i) {
+                if (channels[i].mode == 2 && !channels[i].device &&
+                    !strcmp(name, channels[i].name)) return 0;
+            }
+            for (slot = 1; slot <= 16; ++slot) {
+                krnl_reu_dir_read(slot - 1);
+                if (*reu_dir_name) continue;
+                for (i = 0; i < CHANNELS; ++i) {
+                    if (channels[i].mode && !channels[i].device && channels[i].slot == slot) break;
+                }
+                if (i == CHANNELS) break;
+            }
+            if (slot > 16) return 0;
+            strcpy(ch->name, name);
+        } else {
+            if (!slot) {
+                *result = KRNL_DISK_NOT_FOUND;
+                return 0;
+            }
+            if (reu_dir_type != type) return 0;
+            ch->size = reu_dir_size;
+        }
+        ch->slot = slot;
     }
-    file_open = 0;
+    ch->device = device;
+    ch->type = type;
+    if (device) ch->size = 0;
+    ch->position = 0;
+    ch->mode = write ? 2 : 1;
+    *result = 0;
+    return handle + 1;
 }
 
-unsigned char cmdosk_disk_busy(void)
+int krnl_file_transfer(unsigned char handle, void* data, unsigned char count,
+                       unsigned char write)
 {
-    return file_open != 0;
+    Channel* ch;
+    int transferred;
+
+    if (!handle || handle > CHANNELS || count > KRNL_BUFFER_SIZE) return -1;
+    ch = &channels[handle - 1];
+    if (ch->mode != (write ? 2 : 1)) return -1;
+    if (!count) return 0;
+    if (ch->device) {
+        if (!write && ch->size) return 0;
+        handle += FIRST_LFN - 1;
+        transferred = write ? cbm_write(handle, data, count) : cbm_read(handle, data, count);
+        if (cbm_k_readst() & (write ? 0xff : 0xbf)) return -1;
+        ch->size = cbm_k_readst() & 0x40;
+        return transferred;
+    }
+    if (write) {
+        if (count > 0xffffu - ch->position) return -1;
+    } else if (count > ch->size - ch->position) {
+        count = ch->size - ch->position;
+    }
+    if (!count) return 0;
+    reu_offset[2] = ch->slot;
+    reu_position = ch->position;
+    reu_buffer = data;
+    reu_length = count;
+    krnl_reu_transfer(write ? 0x90 : 0x91);
+    ch->position += count;
+    return count;
 }
 
-void cmdosk_disk_dispatch(void)
+unsigned char krnl_file_close(unsigned char handle, unsigned char abort)
+{
+    Channel* ch;
+    unsigned char status = 0;
+
+    if (!handle || handle > CHANNELS) return KRNL_DISK_ERROR;
+    ch = &channels[handle - 1];
+    if (!ch->mode) return KRNL_DISK_ERROR;
+    if (ch->device) {
+        unsigned char check_status = ch->mode == 2 && !abort;
+        if (check_status) status = cbm_open(STATUS_LFN, ch->device, 15, "");
+        cbm_close(FIRST_LFN + handle - 1);
+        if (check_status && !status) {
+            status = krnl_disk_status();
+            cbm_close(STATUS_LFN);
+        }
+    } else if (ch->mode == 2 && !abort) {
+        krnl_reu_publish(ch->slot, ch->name, ch->position, ch->type);
+    }
+    ch->mode = 0;
+    return status;
+}
+
+void krnl_disk_finish(void)
+{
+    unsigned char i;
+    for (i = 1; i <= CHANNELS; ++i) krnl_file_close(i, 1);
+}
+
+unsigned char krnl_disk_busy(void)
+{
+    unsigned char i;
+
+    for (i = 0; i < CHANNELS; ++i) if (channels[i].mode) return 1;
+    for (i = 0; i < KERNAL_OPEN_FILES && i < 10; ++i) {
+        if (KERNAL_FILE_DEVICES[i] >= 8) return 1;
+    }
+    return 0;
+}
+
+void krnl_disk_dispatch(void)
 {
     int count;
 
-    switch (TUI_REQUEST.operation) {
-        case TUI_COPY:
-            TUI_REQUEST.count = 0;
-            if (file_open) TUI_REQUEST.result = TUI_COPY_IO;
-            else cmdosk_copy();
+    switch (KRNL_REQUEST.operation) {
+        case KRNL_COPY:
+            KRNL_REQUEST.count = 0;
+            if (krnl_disk_busy()) KRNL_REQUEST.result = KRNL_COPY_IO;
+            else krnl_disk_copy();
             break;
-        case TUI_REU:
-            TUI_REQUEST.result = reu_detected;
+        case KRNL_REU_STATUS:
+            KRNL_REQUEST.result = reu_detected == 2 ? KRNL_REU_16MIB
+                : (reu_detected ? KRNL_REU_PRESENT : KRNL_REU_ABSENT);
             break;
-        case TUI_DISK_API:
-            memcpy(TUI_REQUEST.data, &disk_api, sizeof(disk_api));
-            TUI_REQUEST.result = 0x40 | mounted;
-            break;
-        case TUI_DISK_COMMAND:
-            TUI_REQUEST.result = TUI_REQUEST.device
-                ? cmdosk_disk_command(TUI_REQUEST.device, (char*)TUI_REQUEST.data)
-                : reu_disk_command((char*)TUI_REQUEST.data);
-            break;
-        case TUI_PICK_FILE:
-            if (!file_open) {
-                cmdosk_pick_file();
-            }
-            break;
-        case TUI_READ_OPEN:
-        case TUI_WRITE_OPEN:
-            if (!TUI_REQUEST.device) {
-                TUI_REQUEST.result = 1;
-                if (!file_open) {
-                    char* name = (char*)TUI_REQUEST.data + 2;
-                    char* suffix = strchr(name, ',');
-                    if (!suffix || suffix == name) break;
-                    *suffix = 0;
-                    TUI_REQUEST.result = reu_open(name, TUI_REQUEST.operation == TUI_WRITE_OPEN);
-                }
+        case KRNL_DISK_COMMAND:
+            if (krnl_disk_busy()) {
+                KRNL_REQUEST.result = KRNL_DISK_ERROR;
                 break;
             }
-            if (file_open || cbm_open(STATUS_LFN, TUI_REQUEST.device, 15, "") != 0) {
-                TUI_REQUEST.result = 1;
-                break;
-            }
-            if (cbm_open(FILE_LFN, TUI_REQUEST.device, CBM_SEQ,
-                         (char*)TUI_REQUEST.data) != 0 || cmdosk_disk_status()) {
-                cbm_k_close(FILE_LFN);
-                cbm_k_close(STATUS_LFN);
-                TUI_REQUEST.result = 1;
-                break;
-            }
-            file_open = 1;
+            KRNL_REQUEST.result = KRNL_REQUEST.device
+                ? krnl_disk_send_command(KRNL_REQUEST.device, (char*)KRNL_REQUEST.data)
+                : reu_disk_command((char*)KRNL_REQUEST.data);
             break;
-        case TUI_READ:
-            if (file_open != 1 || TUI_REQUEST.count > TUI_TRANSFER) {
-                TUI_REQUEST.result = 255;
-                break;
+        case KRNL_TUI_PICK_FILE:
+            if (!krnl_disk_busy()) {
+                krnl_tui_pick_file();
             }
-            count = TUI_REQUEST.device ? cbm_read(FILE_LFN, TUI_REQUEST.data, TUI_REQUEST.count)
-                                       : reu_read(TUI_REQUEST.data, TUI_REQUEST.count);
-            TUI_REQUEST.result = count < 0 ? 255 : (unsigned char)count;
             break;
-        case TUI_WRITE:
-            if (!file_open || TUI_REQUEST.count > TUI_TRANSFER) {
-                TUI_REQUEST.result = 1;
-                break;
-            }
-            if (!TUI_REQUEST.device) {
-                if (file_open != 2 || TUI_REQUEST.count > 0xffffu - reu_position) {
-                    file_open = 0;
-                    TUI_REQUEST.result = 1;
-                    break;
-                }
-                reu_buffer = TUI_REQUEST.data;
-                reu_length = TUI_REQUEST.count;
-                reu_transfer(0x90);
-                reu_position += reu_length;
-                break;
-            }
-            count = cbm_write(FILE_LFN, TUI_REQUEST.data, TUI_REQUEST.count);
-            TUI_REQUEST.result = count != TUI_REQUEST.count;
+        case KRNL_DISK_READ_OPEN:
+        case KRNL_DISK_WRITE_OPEN:
+            KRNL_REQUEST.data[16] = 0;
+            KRNL_REQUEST.x = krnl_file_open(KRNL_REQUEST.y,
+                (const char*)KRNL_REQUEST.data, KRNL_REQUEST.style,
+                KRNL_REQUEST.operation == KRNL_DISK_WRITE_OPEN, &KRNL_REQUEST.result);
             break;
-        case TUI_CLOSE:
-            if (!TUI_REQUEST.device) {
-                if (file_open == 2) {
-                    cmdosk_reu_publish(reu_offset[2], reu_write_name, reu_position, CBM_T_SEQ);
-                }
-                file_open = 0;
-                break;
-            }
-            cbm_k_close(FILE_LFN);
-            TUI_REQUEST.result = cmdosk_disk_status();
-            cbm_k_close(STATUS_LFN);
-            file_open = 0;
+        case KRNL_DISK_READ:
+        case KRNL_DISK_WRITE:
+            count = krnl_file_transfer(KRNL_REQUEST.x, KRNL_REQUEST.data, KRNL_REQUEST.count,
+                                      KRNL_REQUEST.operation == KRNL_DISK_WRITE);
+            if (KRNL_REQUEST.operation == KRNL_DISK_WRITE)
+                KRNL_REQUEST.result = count == KRNL_REQUEST.count ? 0 : KRNL_DISK_ERROR;
+            else
+                KRNL_REQUEST.result = count < 0 ? KRNL_DISK_ERROR : (unsigned char)count;
+            break;
+        case KRNL_DISK_CLOSE:
+            KRNL_REQUEST.result = krnl_file_close(KRNL_REQUEST.x, KRNL_REQUEST.count);
             break;
     }
 }

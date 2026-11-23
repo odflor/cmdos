@@ -12,10 +12,10 @@ static unsigned char read_page(unsigned int skip, char names[][17])
     struct cbm_dirent entry;
     unsigned char count = 0, result;
 
-    if (!TUI_REQUEST.device) {
+    if (!KRNL_REQUEST.device) {
         for (result = 0; result < 16; ++result) {
-            reu_dir_read(result);
-            if (!*reu_dir_name || reu_dir_type != TUI_REQUEST.style) continue;
+            krnl_reu_dir_read(result);
+            if (!*reu_dir_name || reu_dir_type != KRNL_REQUEST.style) continue;
             if (skip) --skip;
             else {
                 if (count == PICK_ROWS) return count + 1;
@@ -24,12 +24,12 @@ static unsigned char read_page(unsigned int skip, char names[][17])
         }
         return count;
     }
-    if (cbm_opendir(PICK_LFN, TUI_REQUEST.device) != 0) {
+    if (cbm_opendir(PICK_LFN, KRNL_REQUEST.device) != 0) {
         cbm_k_close(PICK_LFN);
         return 255;
     }
     while ((result = cbm_readdir(PICK_LFN, &entry)) == 0) {
-        if (entry.type != TUI_REQUEST.style) {
+        if (entry.type != KRNL_REQUEST.style) {
             continue;
         }
         if (skip) {
@@ -47,17 +47,17 @@ static unsigned char read_page(unsigned int skip, char names[][17])
     return result == 0 || result == 2 ? count : 255;
 }
 
-void cmdosk_pick_file(void)
+void krnl_tui_pick_file(void)
 {
     char names[PICK_ROWS][17];
     unsigned int skip = 0;
     unsigned char count, row, selected = 0, key, loaded = 0;
     const unsigned char* text;
 
-    TUI_REQUEST.result = 0;
-    tui_box(21, 4, 38, 14, TUI_POPUP);
-    tui_text_span(22, 5, 36, TUI_POPUP | 0x80, (const unsigned char*)" Seleccionar archivo");
-    tui_text_span(22, 16, 36, TUI_POPUP, (const unsigned char*)" Flechas/Enter  Esc");
+    KRNL_REQUEST.result = 0;
+    krnl_tui_box(21, 4, 38, 14, KRNL_TUI_POPUP);
+    krnl_tui_text_span(22, 5, 36, KRNL_TUI_POPUP | 0x80, (const unsigned char*)" Seleccionar archivo");
+    krnl_tui_text_span(22, 16, 36, KRNL_TUI_POPUP, (const unsigned char*)" Flechas/Enter  Esc");
     for (;;) {
         if (!loaded) {
             count = read_page(skip, names);
@@ -75,7 +75,7 @@ void cmdosk_pick_file(void)
             } else if (count == 0 && row == 0) {
                 text = (const unsigned char*)" Sin archivos";
             }
-            tui_text_span(22, 6 + row, 36, TUI_POPUP | ((count && count != 255 && row == selected) ? 0x80 : 0), text);
+            krnl_tui_text_span(22, 6 + row, 36, KRNL_TUI_POPUP | ((count && count != 255 && row == selected) ? 0x80 : 0), text);
         }
         key = cgetc();
         if (key == 27) {
@@ -85,8 +85,8 @@ void cmdosk_pick_file(void)
             continue;
         }
         if (key == CH_ENTER || key == 10) {
-            strcpy((char*)TUI_REQUEST.data, names[selected]);
-            TUI_REQUEST.result = 1;
+            strcpy((char*)KRNL_REQUEST.data, names[selected]);
+            KRNL_REQUEST.result = KRNL_PICK_SELECTED;
             return;
         }
         if (key == CH_CURS_DOWN && selected + 1 < count) {

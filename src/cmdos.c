@@ -17,20 +17,20 @@
 #define CMDP_HEADER_SIZE 16
 #define CMDP_FLAG_BANK0  0x01
 #define CMDP_FLAG_BANK1  0x02
-#define APP_LOAD_ADDRESS 0x7000
-/* The application's C stack starts at $B000. */
-#define APP_LOAD_LIMIT   0xB000
+#define APP_LOAD_ADDRESS 0x7400
+/* The application's C stack starts at $B400. */
+#define APP_LOAD_LIMIT   0xB400
 
 static unsigned char current_drive = 8;
 #define REU_DRIVE 0
-void __fastcall__ reu_dir_read(unsigned char slot);
+void __fastcall__ krnl_reu_dir_read(unsigned char slot);
 extern char reu_dir_name[17];
 extern unsigned int reu_dir_size;
 extern unsigned char reu_dir_type;
 extern unsigned char reu_offset[3];
 extern void* reu_buffer;
 extern unsigned int reu_length;
-void __fastcall__ reu_transfer(unsigned char command);
+void __fastcall__ krnl_reu_transfer(unsigned char command);
 extern unsigned int reu_position;
 static char command_line[CMDLINE_SIZE];
 
@@ -100,7 +100,7 @@ static void print_name(const char* name)
 static const char* file_type(unsigned char type)
 {
     switch (type) {
-        case CMDOSK_SWAP_TYPE: return "SWP";
+        case KRNL_SWAP_TYPE: return "SWP";
         case CBM_T_PRG: return "PRG";
         case CBM_T_SEQ: return "SEQ";
         case CBM_T_USR: return "USR";
@@ -233,12 +233,12 @@ static unsigned char make_program_name(const char* requested, char* name)
 {
     unsigned int length = (unsigned int)strlen(requested);
 
-    if (!valid_filename(requested)) {
+    if (!krnl_valid_filename(requested)) {
         return 1;
     }
     strcpy(name, requested);
     if (!strchr(name, '.')) {
-        if (length + 4 > CMDOS_FILENAME_MAX) {
+        if (length + 4 > KRNL_FILENAME_MAX) {
             return 1;
         }
         strcat(name, ".cmd");
@@ -260,30 +260,30 @@ static void split_program(char* name)
     cmdp_arguments = tail;
 }
 
-unsigned char reu_find(const char* name)
+unsigned char krnl_reu_find(const char* name)
 {
     unsigned char slot;
     for (slot = 0; slot < 16; ++slot) {
-        reu_dir_read(slot);
+        krnl_reu_dir_read(slot);
         if (strcmp(name, reu_dir_name) == 0) return slot + 1;
     }
     return 0;
 }
 
-unsigned int reu_read(void* buffer, unsigned int size)
+unsigned int krnl_reu_read(void* buffer, unsigned int size)
 {
     unsigned int remaining = reu_dir_size - reu_position;
     if (size > remaining) size = remaining;
     reu_buffer = buffer;
     reu_length = size;
-    reu_transfer(0x91);
+    krnl_reu_transfer(0x91);
     reu_position += size;
     return size;
 }
 
 static int read_program(void* buffer, unsigned int size)
 {
-    return current_drive ? cbm_read(PROGRAM_LFN, buffer, size) : reu_read(buffer, size);
+    return current_drive ? cbm_read(PROGRAM_LFN, buffer, size) : krnl_reu_read(buffer, size);
 }
 
 static void close_program(void)
@@ -314,7 +314,7 @@ static int run_program(const char* requested)
     if (current_drive) {
         result = cbm_open(PROGRAM_LFN, current_drive, CBM_READ, name);
     } else {
-        reu_offset[2] = reu_find(name);
+        reu_offset[2] = krnl_reu_find(name);
         reu_position = 0;
         result = reu_offset[2] ? 0 : 4;
     }
@@ -332,6 +332,12 @@ static int run_program(const char* requested)
         goto invalid_cmdp;
     }
 
+    if (header[12] != KRNL_ABI_VERSION) {
+        close_program();
+        cputs("CMDP incompatible con la ABI actual. Recompilar.\r\n");
+        return 1;
+    }
+
     flags = header[5];
     load_address = little_endian_word(&header[6]);
     entry_offset = little_endian_word(&header[8]);
@@ -343,36 +349,36 @@ static int run_program(const char* requested)
     }
 
     if (entry_offset >= payload_size ||
-        (bank1 ? (header[12] != 2 || load_address != 0x1000 || payload_size > 0x2400)
-               : (header[12] > 2 || load_address != APP_LOAD_ADDRESS ||
+        (bank1 ? (load_address != 0x1000 || payload_size > 0x2400)
+               : (load_address != APP_LOAD_ADDRESS ||
                   payload_size > (APP_LOAD_LIMIT - APP_LOAD_ADDRESS)))) {
         goto invalid_cmdp;
     }
 
     if (bank1) {
-        bank1_prepare(current_drive);
+        krnl_bank1_prepare(current_drive);
         copied = 0;
         while (copied < payload_size) {
             chunk = payload_size - copied;
-            if (chunk > TUI_TRANSFER) {
-                chunk = TUI_TRANSFER;
+            if (chunk > KRNL_BUFFER_SIZE) {
+                chunk = KRNL_BUFFER_SIZE;
             }
-            if (read_program(TUI_REQUEST.data, chunk) != (int)chunk) {
+            if (read_program(KRNL_REQUEST.data, chunk) != (int)chunk) {
                 close_program();
-                bank1_finish();
+                krnl_bank1_finish();
                 cputs("Carga incompleta.\r\n");
                 return 1;
             }
-            TUI_REQUEST.count = (unsigned char)chunk;
-            bank1_store(load_address + copied);
+            KRNL_REQUEST.count = (unsigned char)chunk;
+            krnl_bank1_store(load_address + copied);
             copied += chunk;
         }
         close_program();
-        tui_editor_keys(1);
-        exit_code = bank1_run(load_address + entry_offset);
-        tui_editor_keys(0);
-        bank1_finish();
-        tui_reset();
+        krnl_keyboard_editor_keys(1);
+        exit_code = krnl_bank1_run(load_address + entry_offset);
+        krnl_keyboard_editor_keys(0);
+        krnl_bank1_finish();
+        krnl_tui_reset();
         return exit_code;
     }
 
@@ -384,13 +390,10 @@ static int run_program(const char* requested)
     }
 
     entry = (int (*)(void))(load_address + entry_offset);
-    if (header[12] == 2) {
-        bank1_prepare(current_drive ? current_drive : 8);
-        exit_code = entry();
-        bank1_finish();
-        return exit_code;
-    }
-    return entry();
+    krnl_bank1_prepare(current_drive ? current_drive : 8);
+    exit_code = entry();
+    krnl_bank1_finish();
+    return exit_code;
 
 invalid_cmdp:
     close_program();
@@ -423,7 +426,7 @@ static unsigned char run_implicit(char* command)
 
     split_program(command);
     if (make_program_name(command, name)) return 0;
-    if (current_drive ? iec_file_type(name) == 255 : !reu_find(name)) return 0;
+    if (current_drive ? iec_file_type(name) == 255 : !krnl_reu_find(name)) return 0;
     last_exit_code = run_program(name);
     return 1;
 }
@@ -445,7 +448,7 @@ static void prompt(void)
     cputs("> ");
 }
 
-void cmdosk_bind_help(void);
+void krnl_keyboard_bind_help(void);
 
 static void read_command(void)
 {
@@ -454,9 +457,9 @@ static void read_command(void)
     cursor(1);
     for (;;) {
         key = cgetc();
-        if (cmdosk_session_hotkey(key)) {
+        if (krnl_session_hotkey(key)) {
             cputs("\r\n");
-            cmdosk_session_menu();
+            krnl_session_menu();
             length = 0;
             break;
         }
@@ -473,7 +476,7 @@ static void read_command(void)
             y = wherey();
             if (x) --x;
             else {
-                x = TUI_WIDTH - 1;
+                x = KRNL_TUI_WIDTH - 1;
                 --y;
             }
             gotoxy(x, y);
@@ -502,12 +505,12 @@ static int run_system_program(const char* name, const char* arguments)
 }
 
 unsigned char reu_detected;
-unsigned char reu_probe(void);
-unsigned char vdc_vram_kib(void);
-unsigned char reu_mount(void);
-void reu_format(void);
+unsigned char krnl_reu_probe(void);
+unsigned char krnl_vdc_vram_kib(void);
+unsigned char krnl_reu_mount(void);
+void krnl_reu_format(void);
 unsigned char mounted;
-void __fastcall__ reu_write_entry(unsigned char slot);
+void __fastcall__ krnl_reu_write_entry(unsigned char slot);
 
 static void format_reu_volume(void)
 {
@@ -531,8 +534,8 @@ static void format_reu_volume(void)
         cputs("Formato cancelado.\r\n");
         return;
     }
-    reu_format();
-    mounted = reu_mount();
+    krnl_reu_format();
+    mounted = krnl_reu_mount();
     cputs(mounted ? "M: formateada y montada.\r\n" : "Error al formatear M:.\r\n");
 }
 
@@ -545,25 +548,26 @@ void main(void)
     /* Blank the VIC-II display explicitly, including during slow IEC cycles. */
     VIC_CONTROL_1 &= 0x6F;
     VIC_CLOCK |= 1;
-    tui_reset();
+    krnl_tui_reset();
     cputs("Command-OS (cmd-os)\r\nVDC: 80 columnas, ");
-    cputs(vdc_vram_kib() == 64 ? "64 KB" : "16 KB");
+    cputs(krnl_vdc_vram_kib() == 64 ? "64 KB" : "16 KB");
     cputs(" de VRAM. CPU: 2 MHz.\r\n");
     cputs("A: IEC 8.\r\n");
-    reu_detected = reu_probe();
+    reu_detected = krnl_reu_probe();
     if (reu_detected == 2) {
         cputs("REU detectada: 16 MiB.\r\n");
     } else if (reu_detected) {
         cputs("REU detectada.\r\n");
     }
-    if (reu_detected == 2) mounted = reu_mount();
-    cmdosk_bind_help();
+    if (reu_detected == 2) mounted = krnl_reu_mount();
+    krnl_session_boot_notice();
+    krnl_keyboard_bind_help();
     cputs("\r\nEscriba HELP o pulse la tecla HELP para ayuda.\r\n");
 
     for (;;) {
         if (bank1_suspend_pending) {
             bank1_suspend_pending = 0;
-            cmdosk_session_switch_pending();
+            krnl_session_switch_pending();
             continue;
         }
         prompt();
@@ -579,7 +583,7 @@ void main(void)
                 unsigned char slot, used = 0;
                 cputs("Directorio M:\r\n\r\n");
                 for (slot = 0; slot < 16; ++slot) {
-                    reu_dir_read(slot);
+                    krnl_reu_dir_read(slot);
                     if (*reu_dir_name) {
                         unsigned int tenths = (reu_dir_size >> 10) * 10 +
                             (((reu_dir_size & 1023) * 10 + 512) >> 10);
@@ -620,6 +624,7 @@ void main(void)
         } else if (strcmp(command_upper, "VER") == 0) {
             cputs("CMD-OS 0.2.0\r\n");
         } else if (strcmp(command_upper, "EXIT") == 0) {
+            if (!krnl_session_confirm_exit()) continue;
             cputs("Ya podes apagar.\r\n");
             for (;;) {
                 cgetc();
@@ -638,15 +643,15 @@ void main(void)
             unsigned char slot;
             char* name = command + 4;
             trim_left(&name);
-            if (current_drive && valid_filename(name) && iec_file_type(name) != 255) {
+            if (current_drive && krnl_valid_filename(name) && iec_file_type(name) != 255) {
                 memcpy(name - 3, "s0:", 3);
-                if (cmdosk_disk_command(current_drive, name - 3) == 1) cputs("Borrado.\r\n");
+                if (krnl_disk_send_command(current_drive, name - 3) == 1) cputs("Borrado.\r\n");
                 else cputs("Error.\r\n");
-            } else if (!current_drive && *name && (slot = reu_find(name))) {
+            } else if (!current_drive && *name && (slot = krnl_reu_find(name))) {
                 *reu_dir_name = 0;
                 reu_buffer = reu_dir_name;
                 reu_length = 1;
-                reu_write_entry(slot - 1);
+                krnl_reu_write_entry(slot - 1);
                 cputs("Borrado.\r\n");
             } else {
                 cputs("No existe.\r\n");

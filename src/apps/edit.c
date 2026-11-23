@@ -1,3 +1,4 @@
+#include <cbm.h>
 #include <conio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5,7 +6,7 @@
 
 #define DOCUMENT ((unsigned char*)0x3800)
 #define CAPACITY 0x8800u
-#define COLUMNS TUI_WIDTH
+#define COLUMNS KRNL_TUI_WIDTH
 #define CACHE_VALID (COLUMNS + 1)
 #define DOCUMENT_TOP 1
 #define ROWS 21
@@ -13,6 +14,7 @@
 #define ESCAPE 27
 #define MENU_EXIT 1
 #define MENU_NEW 2
+#define MENU_SAVE_AS 3
 #define FILE_MENU_ITEMS 5
 #define REVERSE 0x80
 #define SAVE_TEMP "cmdos-edit.tmp"
@@ -30,14 +32,14 @@ static const char* status = "Documento nuevo";
 
 static void call(unsigned char operation)
 {
-    TUI_REQUEST.operation = operation;
+    KRNL_REQUEST.operation = operation;
     ((void (*)(void))0x0E00)();
 }
 
 static unsigned char key(void)
 {
-    call(TUI_KEY);
-    return TUI_REQUEST.result;
+    call(KRNL_KEY_READ);
+    return KRNL_REQUEST.result;
 }
 
 static void draw(unsigned char x, unsigned char y, unsigned char width,
@@ -46,13 +48,13 @@ static void draw(unsigned char x, unsigned char y, unsigned char width,
     unsigned char i;
 
     for (i = 0; i < width; ++i) {
-        TUI_REQUEST.data[i] = *text ? *text++ : ' ';
+        KRNL_REQUEST.data[i] = *text ? *text++ : ' ';
     }
-    TUI_REQUEST.x = x;
-    TUI_REQUEST.y = y;
-    TUI_REQUEST.count = width;
-    TUI_REQUEST.style = style;
-    call(TUI_DRAW);
+    KRNL_REQUEST.x = x;
+    KRNL_REQUEST.y = y;
+    KRNL_REQUEST.count = width;
+    KRNL_REQUEST.style = style;
+    call(KRNL_TUI_DRAW);
 }
 
 static void draw_row(unsigned char x, unsigned char y, unsigned char width,
@@ -179,7 +181,7 @@ static void render_line(unsigned int row, unsigned int end, unsigned char y)
         line[i++] = printable(value) ? value : '.';
     }
     line[i] = 0;
-    draw_row(0, y, COLUMNS, TUI_TEXT, line);
+    draw_row(0, y, COLUMNS, KRNL_TUI_TEXT, line);
 }
 
 static void render_document(void)
@@ -223,7 +225,7 @@ static void render(void)
         edit_end = row_end(edit_row);
         render_line(edit_row, edit_end, edit_y);
     } else {
-        draw_row(0, 0, 79, TUI_ACCENT | REVERSE,
+        draw_row(0, 0, 79, KRNL_TUI_ACCENT | REVERSE,
                  " Archivo   Edicion            CMD-OS / EDITOR DE TEXTO       F7 MENU");
         render_document();
     }
@@ -231,15 +233,15 @@ static void render(void)
     strcat(line, filename[0] ? filename : "(sin nombre)");
     strcat(line, "  |  ");
     strcat(line, status);
-    draw_row(0, 22, 79, TUI_ACCENT | REVERSE, line);
+    draw_row(0, 22, 79, KRNL_TUI_ACCENT | REVERSE, line);
     strcpy(line, dirty ? "* Modificado   " : "  ");
     utoa(length(), line + strlen(line), 10);
-    strcat(line, " / 34816 bytes   F2 Inicio  F4 Fin  F5 Guardar como");
-    draw_row(0, 23, 79, TUI_TEXT, line);
+    strcat(line, " / 34816 bytes   F2 Inicio  F4 Fin");
+    draw_row(0, 23, 79, KRNL_TUI_TEXT, line);
     column = head - edit_row;
-    TUI_REQUEST.x = column < COLUMNS ? (unsigned char)column : COLUMNS - 1;
-    TUI_REQUEST.y = edit_y;
-    call(TUI_CURSOR);
+    KRNL_REQUEST.x = column < COLUMNS ? (unsigned char)column : COLUMNS - 1;
+    KRNL_REQUEST.y = edit_y;
+    call(KRNL_TUI_CURSOR);
 }
 
 static void popup(const char* title, const char* message)
@@ -249,9 +251,9 @@ static void popup(const char* title, const char* message)
     for (row = 8; row <= 12; ++row) {
         screen[row][CACHE_VALID] = 0;
     }
-    strcpy((char*)TUI_REQUEST.data, title);
-    strcpy((char*)TUI_REQUEST.data + 50, message);
-    call(TUI_DIALOG);
+    strcpy((char*)KRNL_REQUEST.data, title);
+    strcpy((char*)KRNL_REQUEST.data + 50, message);
+    call(KRNL_TUI_DIALOG);
 }
 
 static unsigned char discard(void)
@@ -271,19 +273,19 @@ static unsigned char browse_name(char* name)
     unsigned char row;
 
     render();
-    TUI_REQUEST.style = CBM_T_SEQ;
-    call(TUI_PICK_FILE);
+    KRNL_REQUEST.style = CBM_T_SEQ;
+    call(KRNL_TUI_PICK_FILE);
     for (row = 4; row <= 17; ++row) {
         screen[row][CACHE_VALID] = 0;
     }
-    if (!TUI_REQUEST.result) {
+    if (KRNL_REQUEST.result != KRNL_PICK_SELECTED) {
         return 0;
     }
-    if (!valid_filename((char*)TUI_REQUEST.data)) {
+    if (!krnl_valid_filename((char*)KRNL_REQUEST.data)) {
         status = "Nombre de archivo invalido";
         return 0;
     }
-    strcpy(name, (char*)TUI_REQUEST.data);
+    strcpy(name, (char*)KRNL_REQUEST.data);
     render();
     return 2;
 }
@@ -297,17 +299,17 @@ static unsigned char ask_name(const char* title, char* name, const char* suggest
     suggested = count != 0;
     popup(title, " Enter sin nombre: lista   Esc: cancela");
     for (;;) {
-        draw(17, 11, FILENAME_MAX + 1, TUI_POPUP | REVERSE, name);
-        TUI_REQUEST.x = 17 + count;
-        TUI_REQUEST.y = 11;
-        call(TUI_CURSOR);
+        draw(17, 11, FILENAME_MAX + 1, KRNL_TUI_POPUP | REVERSE, name);
+        KRNL_REQUEST.x = 17 + count;
+        KRNL_REQUEST.y = 11;
+        call(KRNL_TUI_CURSOR);
         value = key();
         if (value == ESCAPE) {
             return 0;
         }
         if (value == CH_ENTER || value == 10) {
             if (!count) return browse_name(name);
-            if (valid_filename(name)) return 1;
+            if (krnl_valid_filename(name)) return 1;
             popup(title, " Nombre invalido. Corrija el nombre o pulse Esc");
         }
         if (value == CH_DEL && count) {
@@ -325,40 +327,40 @@ static unsigned char ask_name(const char* title, char* name, const char* suggest
 
 static unsigned char open_file(const char* name, unsigned char write)
 {
-    char* request = (char*)TUI_REQUEST.data;
-
-    *request++ = '0';
-    *request++ = ':';
-    strcpy(request, name);
-    strcat(request, write ? ",s,w" : ",s,r");
-    call(write ? TUI_WRITE_OPEN : TUI_READ_OPEN);
-    return TUI_REQUEST.result == 0;
+    strcpy((char*)KRNL_REQUEST.data, name);
+    KRNL_REQUEST.y = KRNL_REQUEST.device;
+    KRNL_REQUEST.style = CBM_T_SEQ;
+    call(write ? KRNL_DISK_WRITE_OPEN : KRNL_DISK_READ_OPEN);
+    return KRNL_REQUEST.x;
 }
 
-static void read_document(void)
+static void load_document(const char* name, unsigned char allow_new)
 {
-    char name[FILENAME_MAX + 1];
     unsigned char count, i, value, last_cr = 0, failed = 0;
+    unsigned char handle = open_file(name, 0);
 
-    if (!discard() || !ask_name(" ABRIR ARCHIVO SEQ", name, "")) {
-        return;
-    }
-    if (!open_file(name, 0)) {
-        status = "No se pudo abrir el archivo SEQ";
+    if (!handle) {
+        if (allow_new && KRNL_REQUEST.result == KRNL_DISK_NOT_FOUND) {
+            strcpy(filename, name);
+            status = "Documento nuevo";
+        } else {
+            status = "No se pudo abrir el archivo SEQ";
+        }
         return;
     }
     head = top = 0;
     tail = CAPACITY;
     do {
-        TUI_REQUEST.count = TUI_TRANSFER;
-        call(TUI_READ);
-        count = TUI_REQUEST.result;
-        if (count == 255) {
+        KRNL_REQUEST.x = handle;
+        KRNL_REQUEST.count = KRNL_BUFFER_SIZE;
+        call(KRNL_DISK_READ);
+        count = KRNL_REQUEST.result;
+        if (count == KRNL_DISK_ERROR) {
             failed = 1;
             break;
         }
         for (i = 0; i < count; ++i) {
-            value = TUI_REQUEST.data[i];
+            value = KRNL_REQUEST.data[i];
             if (!(last_cr && value == 10)) {
                 if (head == CAPACITY) {
                     failed = 1;
@@ -369,9 +371,11 @@ static void read_document(void)
             last_cr = value == CH_ENTER;
         }
     } while (count && !failed);
-    call(TUI_CLOSE);
+    KRNL_REQUEST.x = handle;
+    KRNL_REQUEST.count = 0;
+    call(KRNL_DISK_CLOSE);
     move_to(0);
-    failed |= TUI_REQUEST.result != 0;
+    failed |= KRNL_REQUEST.result != 0;
     dirty = failed;
     if (failed) {
         filename[0] = 0;
@@ -382,10 +386,19 @@ static void read_document(void)
     }
 }
 
+static void read_document(void)
+{
+    char name[FILENAME_MAX + 1];
+
+    if (discard() && ask_name(" ABRIR ARCHIVO SEQ", name, "")) {
+        load_document(name, 0);
+    }
+}
+
 static unsigned char disk_command(const char* command, const char* name,
                                   const char* old_name)
 {
-    char* request = (char*)TUI_REQUEST.data;
+    char* request = (char*)KRNL_REQUEST.data;
 
     strcpy(request, command);
     strcat(request, name);
@@ -393,14 +406,14 @@ static unsigned char disk_command(const char* command, const char* name,
         strcat(request, "=0:");
         strcat(request, old_name);
     }
-    call(TUI_DISK_COMMAND);
-    return TUI_REQUEST.result;
+    call(KRNL_DISK_COMMAND);
+    return KRNL_REQUEST.result;
 }
 
 static void save_document(unsigned char save_as)
 {
     char name[FILENAME_MAX + 1];
-    unsigned char count, failed = 0, backed_up = 0, result, replace;
+    unsigned char handle, count, failed = 0, backed_up = 0, result, replace;
     unsigned int offset = 0;
 
     result = ask_name(save_as ? " GUARDAR COMO" : " GUARDAR ARCHIVO SEQ", name, filename);
@@ -417,24 +430,27 @@ static void save_document(unsigned char save_as)
         replace = 1;
     }
     if (strcmp(name, SAVE_TEMP) == 0 || strcmp(name, SAVE_BACKUP) == 0 ||
-        !open_file(SAVE_TEMP, 1)) {
+        !(handle = open_file(SAVE_TEMP, 1))) {
         status = "No se pudo crear el archivo temporal";
         return;
     }
     while (offset < length()) {
         count = 0;
-        while (count < TUI_TRANSFER && offset < length()) {
-            TUI_REQUEST.data[count++] = byte_at(offset++);
+        while (count < KRNL_BUFFER_SIZE && offset < length()) {
+            KRNL_REQUEST.data[count++] = byte_at(offset++);
         }
-        TUI_REQUEST.count = count;
-        call(TUI_WRITE);
-        if (TUI_REQUEST.result) {
+        KRNL_REQUEST.x = handle;
+        KRNL_REQUEST.count = count;
+        call(KRNL_DISK_WRITE);
+        if (KRNL_REQUEST.result) {
             failed = 1;
             break;
         }
     }
-    call(TUI_CLOSE);
-    if (failed || TUI_REQUEST.result) {
+    KRNL_REQUEST.x = handle;
+    KRNL_REQUEST.count = failed;
+    call(KRNL_DISK_CLOSE);
+    if (failed || KRNL_REQUEST.result) {
         disk_command("s0:", SAVE_TEMP, 0);
         status = "Error de escritura";
         return;
@@ -468,41 +484,55 @@ static unsigned char menu(void)
     static const unsigned char definition[] =
         "\x02"
         "\x00\x05" "Nuevo\0Abrir           F1\0Guardar         F3\0"
-                   "Guardar como    F5\0Salir\0"
+                   "Guardar como\0Salir\0"
         "\x0a\x03" "Inicio          F2\0Fin             F4\0Borrar caracter";
     static const unsigned char actions[] = {
-        0, MENU_NEW, CH_F1, CH_F3, CH_F5, MENU_EXIT, CH_F2, CH_F4, CH_DEL
+        0, MENU_NEW, CH_F1, CH_F3, MENU_SAVE_AS, MENU_EXIT, CH_F2, CH_F4, CH_DEL
     };
     unsigned char row;
 
-    TUI_REQUEST.y = 1;
-    TUI_REQUEST.style = 22;
-    TUI_REQUEST.count = sizeof(definition);
-    memcpy(TUI_REQUEST.data, definition, sizeof(definition));
-    call(TUI_MENU);
+    KRNL_REQUEST.y = 1;
+    KRNL_REQUEST.style = 22;
+    KRNL_REQUEST.count = sizeof(definition);
+    memcpy(KRNL_REQUEST.data, definition, sizeof(definition));
+    call(KRNL_TUI_MENU);
     for (row = 1; row <= FILE_MENU_ITEMS + 2; ++row) {
         screen[row][CACHE_VALID] = 0;
     }
-    return TUI_REQUEST.result < sizeof(actions) ? actions[TUI_REQUEST.result] : 0;
+    return KRNL_REQUEST.result < sizeof(actions) ? actions[KRNL_REQUEST.result] : 0;
 }
 
 int main(void)
 {
     unsigned char value;
+    char name[FILENAME_MAX + 1];
 
-    call(TUI_CLEAR);
+    call(KRNL_TUI_CLEAR);
+    call(KRNL_ARGS);
+    if (KRNL_REQUEST.data[0]) {
+        if (krnl_valid_filename((const char*)KRNL_REQUEST.data)) {
+            strcpy(name, (const char*)KRNL_REQUEST.data);
+            load_document(name, 1);
+        } else {
+            status = "Nombre de archivo invalido";
+        }
+    }
     for (;;) {
         render();
-        call(TUI_SESSION_KEY);
-        value = TUI_REQUEST.result;
+        call(KRNL_SESSION_KEY);
+        value = KRNL_REQUEST.result;
         fast_edit = 0;
-        if (value == TUI_SESSION_RESUMED) {
+        if (KRNL_REQUEST.count == KRNL_SESSION_RESUMED) {
             memset(screen, 0, sizeof(screen));
-            call(TUI_CLEAR);
+            call(KRNL_TUI_CLEAR);
             continue;
         }
         if (value == CH_F7) {
             value = menu();
+            if (value == MENU_SAVE_AS) {
+                save_document(1);
+                continue;
+            }
             if (value == MENU_NEW) {
                 if (discard()) {
                     head = top = 0;
@@ -525,7 +555,6 @@ int main(void)
             case CH_F2: move_to(0); break;
             case CH_F3: case 19: save_document(0); break;
             case CH_F4: move_to(length()); break;
-            case CH_F5: save_document(1); break;
             case CH_CURS_LEFT: if (head) move_to(head - 1); break;
             case CH_CURS_RIGHT: if (tail < CAPACITY) move_to(head + 1); break;
             case CH_CURS_UP: vertical(0); break;

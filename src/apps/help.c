@@ -15,11 +15,11 @@ int main(void)
           "DEL nombre       Borra el archivo indicado en la unidad activa.\r\n"
           "STATUS           Muestra el ultimo codigo devuelto por un programa.\r\n"
           "VER              Muestra la version de CMD-OS.\r\n"
-          "EXIT             Termina la sesion e indica cuando se puede apagar.\r\n"
+          "EXIT             Avisa si hay sesiones suspendidas antes de apagar.\r\n"
           "HELP             Muestra los comandos. Tambien funciona la tecla HELP.\r\n"
           "\r\n"
           "Aplicaciones incluidas: hello (demostracion), mem (mapa de memoria)\r\n"
-          "y edit (editor de archivos SEQ).\r\n"
+          "y edit [archivo] (abre un SEQ o prepara un documento nuevo).\r\n"
           "Los nombres distinguen mayusculas y minusculas y se escriben sin espacios.\r\n");
     return 0;
 }

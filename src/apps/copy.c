@@ -8,11 +8,11 @@ typedef struct {
     const char* name;
 } Path;
 
-static char args[TUI_TRANSFER];
+static char args[KRNL_BUFFER_SIZE];
 
 static void call(unsigned char operation)
 {
-    TUI_REQUEST.operation = operation;
+    KRNL_REQUEST.operation = operation;
     ((void (*)(void))0x0E00)();
 }
 
@@ -20,7 +20,7 @@ static unsigned char parse_path(char* text, Path* path)
 {
     unsigned char letter = text[0];
 
-    if (!letter || text[1] != ':' || !valid_filename(text + 2)) return 0;
+    if (!letter || text[1] != ':' || !krnl_valid_filename(text + 2)) return 0;
     if (letter >= 'a' && letter <= 'd') letter = 'A' + (letter - 'a');
     if (letter == 'M' || letter == 'm') path->device = 0;
     else if (letter >= 'A' && letter <= 'D') path->device = 8 + letter - 'A';
@@ -41,8 +41,8 @@ int main(void)
     char* second;
     unsigned char result;
 
-    call(TUI_ARGUMENTS);
-    strcpy(args, (const char*)TUI_REQUEST.data);
+    call(KRNL_ARGS);
+    strcpy(args, (const char*)KRNL_REQUEST.data);
     first = args + strspn(args, " \t");
     second = first + strcspn(first, " \t");
     if (!*second) goto usage;
@@ -50,17 +50,17 @@ int main(void)
     second += strspn(second, " \t");
     if (!parse_path(first, &src) || !parse_path(second, &dst)) goto usage;
 
-    TUI_REQUEST.x = src.device;
-    TUI_REQUEST.y = dst.device;
-    strcpy((char*)TUI_REQUEST.data, src.name);
-    strcpy((char*)TUI_REQUEST.data + TUI_COPY_DESTINATION, dst.name);
-    TUI_REQUEST.count = 1;
-    call(TUI_COPY);
-    result = TUI_REQUEST.count ? TUI_COPY_UNSUPPORTED : TUI_REQUEST.result;
-    cputs(result < sizeof(messages) / sizeof(messages[0])
-              ? messages[result] : "Kernel sin API COPY.");
+    KRNL_REQUEST.x = src.device;
+    KRNL_REQUEST.y = dst.device;
+    strcpy((char*)KRNL_REQUEST.data, src.name);
+    strcpy((char*)KRNL_REQUEST.data + KRNL_COPY_DESTINATION, dst.name);
+    KRNL_REQUEST.count = 1;
+    call(KRNL_COPY);
+    result = KRNL_REQUEST.count ? KRNL_COPY_UNSUPPORTED : KRNL_REQUEST.result;
+    cputs(result >= KRNL_COPY_OK && result <= KRNL_COPY_PARTIAL
+              ? messages[result - KRNL_COPY_OK] : "Kernel sin API COPY.");
     cputs("\r\n");
-    return result != TUI_COPY_OK;
+    return result != KRNL_COPY_OK;
 
 usage:
     cputs("Uso: COPY A:origen M:destino\r\n");

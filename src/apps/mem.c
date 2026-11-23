@@ -92,11 +92,11 @@ int main(void)
     cputs("Color VIC-II: $D800-$D823, 36 celdas de 4 bits (18 bytes).\r\n");
     show_bank("CMD-OS: mapa de memoria del banco 1\r\n",
               bank1, sizeof(bank1) / sizeof(bank1[0]));
-    TUI_REQUEST.operation = TUI_REU;
+    KRNL_REQUEST.operation = KRNL_REU_STATUS;
     ((void (*)(void))0x0E00)();
-    if (TUI_REQUEST.result == 2)
+    if (KRNL_REQUEST.result == KRNL_REU_16MIB)
         cputs("REU: 16 MiB (banco de 8 MiB verificado)\r\n");
-    else if (TUI_REQUEST.result)
+    else if (KRNL_REQUEST.result == KRNL_REU_PRESENT)
         cputs("REU: detectada, capacidad sin confirmar\r\n");
     else
         cputs("REU: no detectada\r\n");

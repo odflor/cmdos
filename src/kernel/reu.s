@@ -1,10 +1,10 @@
-.export _reu_probe
-.export _reu_mount, _reu_format
-.export _reu_dir_read, _reu_dir_name
+.export _krnl_reu_probe
+.export _krnl_reu_mount, _krnl_reu_format
+.export _krnl_reu_dir_read, _reu_dir_name
 .export _reu_dir_size, _reu_dir_type
-.export _reu_transfer, _reu_offset, _reu_buffer, _reu_length
+.export _krnl_reu_transfer, _reu_offset, _reu_buffer, _reu_length
 .export _reu_position
-.export _reu_write_entry
+.export _krnl_reu_write_entry
 
 .bss
 saved: .res 9
@@ -22,7 +22,7 @@ _reu_length: .res 2
 
 .code
 ; 0 = absent, 1 = present, 2 = distinct writable bank at 8 MiB.
-_reu_probe:
+_krnl_reu_probe:
         php
         sei
         lda $df04
@@ -112,7 +112,7 @@ dma:
 ; Header v1 at REU offset zero. Reserved bytes must be zero.
 header: .byte $43,$4d,$4f,$53,$02,$00,$00,$00
 
-_reu_mount:
+_krnl_reu_mount:
         lda #$91
         jsr header_dma
         ldx #7
@@ -128,7 +128,7 @@ invalid:
         lda #0
         rts
 
-_reu_format:
+_krnl_reu_format:
         ; Sixteen 32-byte records at $000100. Zero first byte means free.
         lda #0
         sta _reu_dir_name
@@ -159,14 +159,14 @@ header_setup:
         dex
         bpl header_setup
         pla
-        jmp _reu_transfer
+        jmp _krnl_reu_transfer
 
 header_transfer: .word sample
         .byte 0,0,0
         .word 8
 
 ; Fastcall slot 0..15. Fetch the name and little-endian byte count.
-_reu_dir_read:
+_krnl_reu_dir_read:
         jsr directory_address
         lda #19
         sta $df07
@@ -185,14 +185,14 @@ _reu_dir_read:
         sta _reu_dir_name+16
         rts
 
-_reu_write_entry:
+_krnl_reu_write_entry:
         jsr directory_address
         stx _reu_offset
         sty _reu_offset+1
         lda #0
         sta _reu_offset+2
         lda #$90
-        jmp _reu_transfer
+        jmp _krnl_reu_transfer
 
 directory_address:
         ldy #1
@@ -221,7 +221,7 @@ directory_dma:
 
 ; Fastcall command: $90 writes, $91 reads. A zero length is a no-op.
 ; Load the seven contiguous REU registers from the transfer parameters.
-_reu_transfer:
+_krnl_reu_transfer:
         ldx _reu_length
         bne transfer
         ldx _reu_length+1

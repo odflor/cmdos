@@ -7,12 +7,12 @@ extern unsigned int reu_position;
 extern unsigned int reu_dir_size;
 extern unsigned int reu_length;
 extern void* reu_buffer;
-void __fastcall__ reu_dir_read(unsigned char slot);
-void __fastcall__ reu_write_entry(unsigned char slot);
-void __fastcall__ reu_transfer(unsigned char command);
-unsigned char reu_find(const char* name);
-unsigned int reu_read(void* buffer, unsigned int size);
-void cmdosk_reu_publish(unsigned char slot, const char* name,
+void __fastcall__ krnl_reu_dir_read(unsigned char slot);
+void __fastcall__ krnl_reu_write_entry(unsigned char slot);
+void __fastcall__ krnl_reu_transfer(unsigned char command);
+unsigned char krnl_reu_find(const char* name);
+unsigned int krnl_reu_read(void* buffer, unsigned int size);
+void krnl_reu_publish(unsigned char slot, const char* name,
                        unsigned int size, unsigned char type);
 
 #endif

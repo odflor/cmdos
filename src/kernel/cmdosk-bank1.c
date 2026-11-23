@@ -8,10 +8,10 @@
 #define VIC_KEY_SAVE ((volatile unsigned char*)0xD800)
 #define SAVED_KEYS_SIZE 18
 
-extern unsigned char bank1_gate[], bank1_gate_size[];
+extern unsigned char krnl_bank1_gate[], bank1_gate_size[];
 static unsigned char saved_ram;
 
-void tui_editor_keys(unsigned char enable)
+void krnl_keyboard_editor_keys(unsigned char enable)
 {
     unsigned char* const keys = (unsigned char*)0x1000;
     unsigned char i;
@@ -35,25 +35,25 @@ void tui_editor_keys(unsigned char enable)
     }
 }
 
-void bank1_prepare(unsigned char device)
+void krnl_bank1_prepare(unsigned char device)
 {
     unsigned int i;
     unsigned char* const common = (unsigned char*)0x0E00;
 
-    memcpy(VIC_COMMON_SAVE, common, TUI_COMMON_SAVE_SIZE);
+    memcpy(VIC_COMMON_SAVE, common, KRNL_BANK1_COMMON_SAVE_SIZE);
     for (i = 0; i < (unsigned int)bank1_gate_size; ++i) {
-        common[i] = bank1_gate[i];
+        common[i] = krnl_bank1_gate[i];
     }
     saved_ram = MMU_RAM;
     MMU_RAM = (saved_ram & 0xF0) | 0x05; /* Bottom 4 KiB common. */
-    TUI_REQUEST.device = device;
+    KRNL_REQUEST.device = device;
 }
 
-void bank1_finish(void)
+void krnl_bank1_finish(void)
 {
     unsigned char* const common = (unsigned char*)0x0E00;
 
-    cmdosk_disk_finish();
+    krnl_disk_finish();
     MMU_RAM = saved_ram;
-    memcpy(common, VIC_COMMON_SAVE, TUI_COMMON_SAVE_SIZE);
+    memcpy(common, VIC_COMMON_SAVE, KRNL_BANK1_COMMON_SAVE_SIZE);
 }

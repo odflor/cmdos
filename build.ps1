@@ -52,19 +52,19 @@ $memoryRows = foreach ($segment in $segments) {
     $name, $start, $end, $size = $segment.Groups[1..4].Value
     if ($name -ne 'LOADADDR' -and $size -ne '000000') {
         $endAddress = [Convert]::ToInt32($end, 16)
-        if ($endAddress -ge 0x7000) {
+        if ($endAddress -ge 0x7400) {
             throw "El segmento $name de CMD-OS invade la zona reservada para aplicaciones."
         }
         $residentEnd = [Math]::Max($residentEnd, $endAddress)
         '    {{ "{0}", 0x{1}, 0x{2}, 0 }},' -f $name, $start, $end
     }
 }
-if ($residentEnd -lt 0x6FFF) {
-    $memoryRows += '    {{ "RAM libre para CMD-OS", 0x{0:X4}, 0x6FFF, 1 }},' -f ($residentEnd + 1)
+if ($residentEnd -lt 0x73FF) {
+    $memoryRows += '    {{ "RAM libre para CMD-OS", 0x{0:X4}, 0x73FF, 1 }},' -f ($residentEnd + 1)
 }
 $memoryRows += '    { "VIC-II: respaldo area comun", 0x0400, 0x05F6, 0 },',
-    '    { "Area CMDP (reserva)", 0x7000, 0xAFFF, 0 },',
-    '    { "Pila C CMDP (reserva)", 0xB000, 0xB7FF, 0 },',
+    '    { "Area CMDP (reserva)", 0x7400, 0xB3FF, 0 },',
+    '    { "Pila C CMDP (reserva)", 0xB400, 0xB7FF, 0 },',
     '    { "Pila C CMD-OS (reserva)", 0xB800, 0xBFFF, 0 },'
 Set-Content -LiteralPath $memoryInclude -Value $memoryRows -Encoding Ascii
 
@@ -75,9 +75,8 @@ foreach ($app in 'hello', 'mem', 'copy', 'help') {
     & $cl65 -t c128 -O -I $buildDir -C $appCfg -o $appRaw $appSource $appCrt0
     if ($LASTEXITCODE -ne 0) { throw "CC65 no pudo compilar la aplicacion $app." }
 
-    $apiVersion = 2
     & (Join-Path $projectRoot 'tools\make-cmd-program.ps1') `
-        -InputFile $appRaw -OutputFile $appCmd -Bank BANK0 -ApiVersion $apiVersion
+        -InputFile $appRaw -OutputFile $appCmd -Bank BANK0
 }
 
 $editRaw = Join-Path $buildDir 'edit.raw'
@@ -85,7 +84,7 @@ $editCmd = Join-Path $buildDir 'edit.cmd'
 & $cl65 -t c128 -O -C $bank1Cfg -o $editRaw (Join-Path $projectRoot 'src\apps\edit.c') $bank1Crt0
 if ($LASTEXITCODE -ne 0) { throw 'CC65 no pudo compilar EDIT.' }
 & (Join-Path $projectRoot 'tools\make-cmd-program.ps1') `
-    -InputFile $editRaw -OutputFile $editCmd -Bank BANK1 -LoadAddress 0x1000 -ApiVersion 2
+    -InputFile $editRaw -OutputFile $editCmd -Bank BANK1 -LoadAddress 0x1000
 
 & $cl65 -t c128 -C (Join-Path $projectRoot 'cfg\cmdos-boot-sector.cfg') -o $bootSector `
     (Join-Path $projectRoot 'src\runtime\cmdos-boot-sector.s')
