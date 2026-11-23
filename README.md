@@ -1,63 +1,73 @@
 # Command-OS (cmd-os)
 
-CMD-OS es un entorno al estilo DOS para el Commodore 128 en modo nativo.
-Arranca desde una D71 en la 1571 del dispositivo 8 y usa el VDC de 80 columnas
-con la CPU a 2 MHz. El arranque informa la VRAM instalada y la REU detectada.
+## 1. Resumen ejecutivo
 
-## Consola y aplicaciones
+Command-OS es un entorno de trabajo al estilo DOS para el Commodore 128 en modo nativo. Arranca desde una imagen D71 en la unidad 1571 del dispositivo 8, usa la pantalla VDC de 80 columnas y trabaja con la CPU a 2 MHz. Al iniciar, informa la memoria de video instalada y la presencia de una REU.
 
-- `A:` a `D:` seleccionan los dispositivos IEC 8 a 11. `DIR` lista la unidad activa.
-- `RUN nombre [argumentos]` o `nombre [argumentos]` ejecuta un CMDP. `STATUS` muestra el último código de salida.
-- `DEL nombre` borra en la unidad activa. `COPY origen destino` exige las dos unidades, por ejemplo `COPY A:edit.cmd M:edit.cmd`, y admite PRG, SEQ y USR sin reemplazar el destino.
-- Los nombres distinguen mayúsculas y minúsculas. Se admiten letras, dígitos, guion y guion bajo, con un punto opcional antes de la extensión. CMD-OS genera nombres en minúsculas.
-- `EDIT` abre y guarda documentos SEQ de hasta 34 KiB en IEC o en `M:`. `EDIT nombre` abre ese SEQ en la unidad activa o propone el nombre al guardar si el archivo todavía no existe. F1 abre, F3 guarda y F7 abre los menús. **Guardar como** está en el menú Archivo. Enter con el nombre vacío muestra un selector filtrado por tipo.
-- Escribí `HELP` o pulsá la tecla HELP en el intérprete para abrir la guía de comandos desde la unidad 8.
-- `MEM` informa el mapa de ambos bancos, las reservas, el margen del kernel y la detección de REU. `EXIT` lista las sesiones suspendidas y pide confirmación antes de apagar.
+El proyecto reúne una consola de comandos, un editor de texto SEQ y servicios compartidos para aplicaciones nativas. Con una REU compatible de 16 MiB, también ofrece el disco en memoria `M:` y permite suspender aplicaciones de Bank 1 y retomarlas más tarde. Command-OS está en desarrollo. Los archivos por lotes y el soporte de NeoRAM Remix quedan para una etapa posterior.
 
-## Disco privado M:
+## 2. Ayuda para el usuario final
 
-Con una REU de 16 MiB compatible, `FORMAT M:` inicializa el volumen tras pedir
-confirmación. `M:` lo selecciona y permite usar `DIR`, `RUN`, `DEL`, `COPY`
-y `EDIT`. El formato actual tiene 16 ranuras de 64 KiB, con un límite de
-65.535 bytes por archivo. `DIR` informa los tamaños, los tipos IEC y el espacio
-asignado y libre por ranuras. El listado deja una línea en blanco después
-de la cabecera y antes de los totales. `COPY` carga su aplicación desde la
-unidad 8 y delega la transferencia al kernel.
+En VICE, montá `build/cmd-os.d71` en la 1571 del dispositivo 8 y seleccioná la pantalla de 80 columnas. El lanzador del proyecto hace esa configuración automáticamente. Cuando aparezca el prompt `CMD-OS A:>`, escribí `HELP` o pulsá la tecla física **HELP**. Conservá la imagen de arranque en el dispositivo 8 para que el sistema pueda cargar la guía y el comando `COPY`.
 
-## Suspender y reanudar aplicaciones
+| Comando | Uso |
+| --- | --- |
+| `A:`, `B:`, `C:`, `D:` | Seleccionan los dispositivos IEC 8, 9, 10 y 11. |
+| `DIR` | Lista los archivos de la unidad activa, sus tipos, tamaños y espacio disponible. |
+| `RUN nombre [argumentos]` | Ejecuta un programa de la unidad activa. También podés escribir directamente su nombre y omitir la extensión `.cmd`. |
+| `COPY origen destino` | Copia archivos PRG, SEQ o USR. Indicá las dos unidades, por ejemplo `COPY A:edit.cmd M:edit.cmd`. Si el destino existe, la copia se rechaza. |
+| `DEL nombre` | Borra un archivo de la unidad activa. |
+| `FORMAT M:`, `M:` | Inicializan el disco REU tras confirmar y seleccionan el volumen montado, respectivamente. |
+| `STATUS`, `MEM`, `VER` | Muestran el último código de salida de un CMDP, el mapa de memoria y la versión del sistema, respectivamente. |
+| `EXIT` | Indica cuándo se puede apagar. Si hay sesiones suspendidas, las lista y pide confirmación. |
 
-Con `M:` montado, pulsá `Alt+Tab` desde el intérprete o desde `EDIT`.
-En VICE podés usar `Ctrl+Y` si el anfitrión captura `Alt+Tab`. Desde
-`EDIT`, elegí **Interprete** u otra sesión suspendida. Desde el intérprete,
-elegí una sesión para reanudarla. Esc vuelve a la pantalla activa. El
-intercambio muestra su progreso y guarda cada sesión en un archivo `.swp`
-de `M:`. Al reanudar `EDIT`, se recupera el documento con sus cambios sin
-guardar y se repinta la pantalla. La opción **Descartar** libera una sesión
-suspendida tras confirmar. Si la REU conserva su contenido al reiniciar,
-CMD-OS anuncia las sesiones disponibles y permite reanudarlas con `Alt+Tab`.
+Los nombres de archivo distinguen mayúsculas y minúsculas. Admiten hasta 16 caracteres PETSCII con letras, dígitos, guiones y guiones bajos, más un punto opcional para separar la extensión. Escribilos sin espacios. Los archivos que genera Command-OS usan minúsculas.
 
-La interfaz actual es ABI 1. Recompilá los CMDP de compilaciones anteriores y reemplazá las copias guardadas en `M:`.
+### Editar documentos
 
-## Memoria
+`EDIT` abre un documento vacío. `EDIT notas.seq` abre el SEQ indicado en la unidad activa. Si el archivo aún no existe, inicia un documento vacío y propone ese nombre al guardar. El editor admite documentos de hasta 34 KiB en IEC o en `M:`.
 
-El kernel y el intérprete residen en Bank 0. Los CMDP de ese banco tienen
-16 KiB en `$7400–$B3FF` y necesitan estar enlazados para `$7400`. Reemplazá
-las copias antiguas de `hello.cmd`, `mem.cmd` y `copy.cmd` guardadas en la REU.
-`edit.cmd` sigue en `$1000` de Bank 1. CMD-OS reutiliza parte de la pantalla
-VIC-II para respaldar el área común y parte de la RAM de color para respaldar
-la configuración del teclado.
+- **F1** abre un archivo. En el diálogo de apertura, Enter con el nombre vacío muestra el selector de archivos SEQ.
+- **F3** guarda. **F7** abre los menús. Elegí **Archivo → Guardar como** para usar otro nombre y **Archivo → Salir** para volver a la consola.
+- **F2** y **F4** llevan al inicio y al final del documento.
 
-Quedan pendientes los lotes y el soporte de NeoRAM Remix. Consultá los
-[lineamientos de CMD-OS](doc/lineamientos-cmd-os.md) para el mapa y los contratos
-del prototipo.
+### Usar M: y cambiar de sesión
 
-## Compilar y ejecutar
+`M:` tiene 16 ranuras de 64 KiB y admite hasta 65.535 bytes por archivo. `DIR` muestra el tamaño y el tipo IEC de cada entrada, además del espacio asignado y libre por ranuras. Los documentos y las sesiones suspendidas comparten esas ranuras.
+
+Con `M:` montado, pulsá **Alt+Tab** desde el editor o la consola. En VICE, usá **Ctrl+Y** si el sistema anfitrión captura el atajo. Desde el editor podés elegir el intérprete u otra sesión suspendida. Desde la consola podés reanudar una sesión o elegir **Descartar** y confirmar su eliminación. **Esc** vuelve a la pantalla activa. El cambio de sesión requiere que los canales de disco estén cerrados. Si la REU conserva su contenido al reiniciar, Command-OS anuncia las sesiones recuperables.
+
+## 3. Estructura interna para desarrolladores
+
+El intérprete y el kernel residen en **Bank 0**. El intérprete procesa la línea de comandos, administra la unidad activa y carga los ejecutables CMDP. Los módulos `src/kernel/cmdosk-*` implementan el despacho de servicios, la interfaz de texto, el teclado, los menús, los archivos y las sesiones. `src/apps/` contiene las aplicaciones y `src/runtime/` contiene el código de arranque.
+
+- **Carga de aplicaciones.** Los CMDP de Bank 0 se enlazan en `$7400–$B3FF`, con 16 KiB para la aplicación y 1 KiB de pila de C en `$B400–$B7FF`. `edit.cmd` se enlaza en `$1000` de Bank 1 y usa `$3800–$BFFF` para el documento. Solo se ejecuta una aplicación a la vez.
+- **ABI 1.** Los CMDP invocan servicios mediante la puerta en `$0E00` y el buzón en `$0F70`, con un búfer de 128 bytes. El puente conserva el contexto de Bank 1, cambia el mapa de la MMU para atender el servicio y restaura el mapa de la aplicación. El contrato en C está en [`src/kernel/cmdosk-abi.h`](src/kernel/cmdosk-abi.h).
+- **Disco.** El kernel ofrece dos canales simultáneos compartidos entre IEC y la REU. Cada apertura devuelve un identificador para leer, escribir y cerrar. `EDIT` usa esos servicios mediante el buzón y `COPY` usa las mismas rutinas dentro del kernel.
+- **Sesiones.** El kernel guarda los 44 KiB de Bank 1 que utiliza la aplicación y su contexto en un archivo `.swp` mediante DMA de la REU. Verifica la integridad antes de restaurar y libera la ranura tras reanudar con éxito.
+
+Durante el desarrollo se mantiene una sola ABI. Recompilá el kernel y los CMDP juntos al cambiar el contrato y actualizá las copias de aplicaciones que hayas guardado en `M:`. El [documento de lineamientos](doc/lineamientos-cmd-os.md) detalla el mapa, los campos del buzón y el formato CMDP. La carpeta [`examples/`](examples/) reúne proyectos y material de referencia en código fuente, programas, imágenes de disco y archivos comprimidos.
+
+## 4. Herramientas, configuración y compilación
+
+Los scripts del repositorio se ejecutan en PowerShell sobre Windows. Para compilar y probar se usan estas herramientas.
+
+1. Descargá y extraé **cc65** con sus bibliotecas para Commodore 128. La carpeta `bin` debe contener `cl65.exe`, que coordina la compilación, el ensamblado y el enlace. [Proyecto cc65](https://cc65.github.io/)
+2. Descargá y extraé **VICE para Windows**. Su carpeta `bin` debe contener `c1541.exe`, que empaqueta la imagen D71, y `x128.exe`, que emula el Commodore 128. Los ejemplos de ruta siguientes usan la instalación de VICE 3.9. [Descargas oficiales de VICE](https://vice-emu.sourceforge.io/#download)
+3. Abrí PowerShell en la raíz del repositorio y ajustá las dos rutas a tu instalación. Los scripts reciben las carpetas `bin` y no requieren agregarlas a `PATH`.
 
 ```powershell
-.\build.ps1
-.\run-vice.ps1
+$cc65Bin = 'D:\Program Files (x86)\cc65\bin'
+$viceBin = 'D:\Program Files (x86)\GTK3VICE-3.9-win64\bin'
+
+.\build.ps1 -Cc65Bin $cc65Bin -ViceBin $viceBin
+.\run-vice.ps1 -ViceBin $viceBin
 ```
 
-El build genera `build\cmd-os.d71` y `build\boot.map`. Usá `-Cc65Bin` y
-`-ViceBin` para indicar otras rutas de herramientas. `run-vice.ps1` monta la
-imagen habitual en la 1571 y configura el VDC con 16 KB y la REU con 16 MiB.
+El build genera `build/cmd-os.d71` con el sector de arranque, `boot` y los CMDP `hello.cmd`, `mem.cmd`, `copy.cmd`, `help.cmd` y `edit.cmd`. También deja los binarios intermedios y el mapa de enlace `build/boot.map`. El lanzador abre la imagen principal en la 1571 del dispositivo 8 y configura el emulador con 80 columnas, 16 KiB de VRAM y 16 MiB de REU. Para probar el arranque, ejecutá `DIR`, `HELP`, `MEM` y `EDIT` en la consola.
+
+## 5. Filosofía de Command-OS
+
+Command-OS parte de una idea sencilla. Queremos que el Commodore 128 sea cómodo de usar para trabajar con archivos, escribir texto y probar aplicaciones propias. La consola mantiene las tareas habituales cerca y el kernel resuelve una sola vez las operaciones que varias aplicaciones necesitan, como abrir un archivo o mostrar un menú.
+
+La memoria disponible, las unidades IEC y el VDC forman parte del diseño cotidiano. Una expansión como la REU agrega posibilidades concretas, como retomar un documento sin guardar, y la consola sigue siendo utilizable en un C128 sin esa expansión. Si querés entender una rutina o probar otra forma de resolverla, podés empezar por los ejemplos y seguir el código hasta el servicio que usa.
