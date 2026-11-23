@@ -21,7 +21,7 @@ _krnl_vdc_vram_kib:
         ora #$10
         jsr write_register
 
-        ; Follow lib/vdc test.prg: write $AA at $0000 and $55 at $4000.
+        ; Follow examples/vdc test.prg: write $AA at $0000 and $55 at $4000.
         ldy #$00
         jsr address
         jsr read_register
