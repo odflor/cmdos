@@ -13,15 +13,15 @@ _reu_dir_name: .res 19
 _reu_dir_size: .res 2
 _reu_dir_type: .res 1
 low: .res 1
-high: .res 1
-found: .res 1
+high: .res 2
+probe_bank: .res 1
 _reu_buffer: .res 2
 _reu_position:
 _reu_offset: .res 3
 _reu_length: .res 2
 
 .code
-; 0 = absent, 1 = present, 2 = distinct writable bank at 8 MiB.
+; Capacity in 64 KiB banks. $FF represents 256 banks (16 MiB).
 _krnl_reu_probe:
         php
         sei
@@ -45,7 +45,6 @@ save:   lda $df02,x
         dex
         bpl save
         lda #0
-        sta found
         sta $df09
         sta $df0a
         tax
@@ -53,44 +52,61 @@ save:   lda $df02,x
         jsr dma
         lda sample
         sta low
-        ldx #$80
+        lda #1
+        sta probe_bank
+probe_next:
+        ldx probe_bank
         lda #$91
         jsr dma
         lda sample
         sta high
+        lda sample+1
+        sta high+1
         lda low
+        sta sample+1
         eor #$ff
         sta sample
         lda #$90
         jsr dma
-        lda #$91
-        jsr dma
-        lda low
-        eor #$ff
-        cmp sample
-        bne restore_byte
+        ; Check for aliasing with bank zero. Require two distinct bytes
+        ; in the candidate bank to reject the 1764's floating bus.
         ldx #0
         lda #$91
         jsr dma
         lda sample
         cmp low
         bne restore_byte
-        inc found
+        ldx probe_bank
+        lda #$91
+        jsr dma
+        lda low
+        eor #$ff
+        cmp sample
+        bne restore_byte
+        lda low
+        cmp sample+1
 restore_byte:
-        ldx #$80
+        php
+        ldx probe_bank
         lda high
         sta sample
+        lda high+1
+        sta sample+1
         lda #$90
         jsr dma
+        plp
+        bne restore_registers
+        asl probe_bank
+        bne probe_next
+        dec probe_bank
+restore_registers:
         ldx #8
 restore:
         lda saved,x
         sta $df02,x
         dex
         bpl restore
-        lda found
-        clc
-        adc #1
+        lda probe_bank
         plp
         rts
 
@@ -104,7 +120,7 @@ dma:
         sty $df05
         stx $df06
         sty $df08
-        iny
+        ldy #2
         sty $df07
         sta $df01
         rts

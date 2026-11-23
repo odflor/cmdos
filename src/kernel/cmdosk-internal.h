@@ -13,7 +13,6 @@ void krnl_tui_menu(void);
 void krnl_disk_dispatch(void);
 void krnl_disk_finish(void);
 unsigned char krnl_disk_busy(void);
-unsigned char krnl_disk_status(void);
 void krnl_disk_copy(void);
 
 #endif

@@ -6,6 +6,7 @@
 #include "filename.h"
 
 #define STATUS_LFN 15
+#define KERNAL_IO_STATUS (*(volatile unsigned char*)0x90)
 #define KERNAL_OPEN_FILES (*(volatile unsigned char*)0x98)
 #define KERNAL_FILE_DEVICES ((volatile const unsigned char*)0x036C)
 
@@ -60,11 +61,11 @@ static unsigned char reu_disk_command(char* command)
     return 0;
 }
 
-unsigned char krnl_disk_status(void)
+static unsigned char krnl_disk_status(unsigned char lfn)
 {
     unsigned char first, second, status = 255;
 
-    if (cbm_k_chkin(STATUS_LFN) == 0) {
+    if (cbm_k_chkin(lfn) == 0) {
         first = cbm_k_basin() - '0';
         second = cbm_k_basin() - '0';
         if (first <= 9 && second <= 9) {
@@ -82,10 +83,19 @@ unsigned char krnl_disk_send_command(unsigned char device, const char* command)
     unsigned char result = 255;
 
     if (device && cbm_open(STATUS_LFN, device, 15, command) == 0) {
-        result = krnl_disk_status();
+        result = krnl_disk_status(STATUS_LFN);
         cbm_k_close(STATUS_LFN);
     }
     return result;
+}
+
+static unsigned char krnl_iec_in_use(unsigned char device)
+{
+    unsigned char i;
+    for (i = 0; i < CHANNELS; ++i) {
+        if (channels[i].mode && channels[i].device == device) return 1;
+    }
+    return 0;
 }
 
 unsigned char krnl_file_open(unsigned char device, const char* name,
@@ -105,16 +115,19 @@ unsigned char krnl_file_open(unsigned char device, const char* name,
     else if (type == CBM_T_USR) suffix[1] = 'u';
     else if (type != CBM_T_PRG) return 0;
     if (device) {
+        unsigned char status_lfn = STATUS_LFN + device - 8;
+        unsigned char first = !krnl_iec_in_use(device);
+
         if (write) suffix[3] = 'w';
         strcpy(request, "0:");
         strcat(request, name);
         strcat(request, suffix);
-        if (cbm_open(STATUS_LFN, device, 15, "") != 0) return 0;
+        if (first && cbm_open(status_lfn, device, 15, "") != 0) return 0;
         i = cbm_open(FIRST_LFN + handle, device, FIRST_LFN + handle, request);
-        *result = krnl_disk_status();
-        cbm_close(STATUS_LFN);
+        *result = krnl_disk_status(status_lfn);
         if (i || *result) {
             cbm_close(FIRST_LFN + handle);
+            if (first) cbm_close(status_lfn);
             if (!*result) *result = KRNL_DISK_ERROR;
             return 0;
         }
@@ -127,7 +140,7 @@ unsigned char krnl_file_open(unsigned char device, const char* name,
                 if (channels[i].mode == 2 && !channels[i].device &&
                     !strcmp(name, channels[i].name)) return 0;
             }
-            for (slot = 1; slot <= 16; ++slot) {
+            for (slot = 1; slot <= reu_slots; ++slot) {
                 krnl_reu_dir_read(slot - 1);
                 if (*reu_dir_name) continue;
                 for (i = 0; i < CHANNELS; ++i) {
@@ -135,7 +148,7 @@ unsigned char krnl_file_open(unsigned char device, const char* name,
                 }
                 if (i == CHANNELS) break;
             }
-            if (slot > 16) return 0;
+            if (slot > reu_slots) return 0;
             strcpy(ch->name, name);
         } else {
             if (!slot) {
@@ -169,6 +182,8 @@ int krnl_file_transfer(unsigned char handle, void* data, unsigned char count,
     if (ch->device) {
         if (!write && ch->size) return 0;
         handle += FIRST_LFN - 1;
+        /* READST is shared by all logical files, including the DOS status channel. */
+        KERNAL_IO_STATUS = 0;
         transferred = write ? cbm_write(handle, data, count) : cbm_read(handle, data, count);
         if (cbm_k_readst() & (write ? 0xff : 0xbf)) return -1;
         ch->size = cbm_k_readst() & 0x40;
@@ -198,17 +213,17 @@ unsigned char krnl_file_close(unsigned char handle, unsigned char abort)
     ch = &channels[handle - 1];
     if (!ch->mode) return KRNL_DISK_ERROR;
     if (ch->device) {
-        unsigned char check_status = ch->mode == 2 && !abort;
-        if (check_status) status = cbm_open(STATUS_LFN, ch->device, 15, "");
+        unsigned char status_lfn = STATUS_LFN + ch->device - 8;
         cbm_close(FIRST_LFN + handle - 1);
-        if (check_status && !status) {
-            status = krnl_disk_status();
-            cbm_close(STATUS_LFN);
-        }
-    } else if (ch->mode == 2 && !abort) {
-        krnl_reu_publish(ch->slot, ch->name, ch->position, ch->type);
+        if (ch->mode == 2 && !abort) status = krnl_disk_status(status_lfn);
+        ch->mode = 0;
+        /* CLOSE on secondary 15 also closes the other files on this drive. */
+        if (!krnl_iec_in_use(ch->device)) cbm_close(status_lfn);
+    } else {
+        if (ch->mode == 2 && !abort)
+            krnl_reu_publish(ch->slot, ch->name, ch->position, ch->type);
+        ch->mode = 0;
     }
-    ch->mode = 0;
     return status;
 }
 
@@ -240,8 +255,7 @@ void krnl_disk_dispatch(void)
             else krnl_disk_copy();
             break;
         case KRNL_REU_STATUS:
-            KRNL_REQUEST.result = reu_detected == 2 ? KRNL_REU_16MIB
-                : (reu_detected ? KRNL_REU_PRESENT : KRNL_REU_ABSENT);
+            KRNL_REQUEST.result = reu_detected;
             break;
         case KRNL_DISK_COMMAND:
             if (krnl_disk_busy()) {

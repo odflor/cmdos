@@ -263,7 +263,7 @@ static void split_program(char* name)
 unsigned char krnl_reu_find(const char* name)
 {
     unsigned char slot;
-    for (slot = 0; slot < 16; ++slot) {
+    for (slot = 0; slot < reu_slots; ++slot) {
         krnl_reu_dir_read(slot);
         if (strcmp(name, reu_dir_name) == 0) return slot + 1;
     }
@@ -504,7 +504,7 @@ static int run_system_program(const char* name, const char* arguments)
     return result;
 }
 
-unsigned char reu_detected;
+unsigned char reu_detected, reu_slots;
 unsigned char krnl_reu_probe(void);
 unsigned char krnl_vdc_vram_kib(void);
 unsigned char krnl_reu_mount(void);
@@ -512,20 +512,20 @@ void krnl_reu_format(void);
 unsigned char mounted;
 void __fastcall__ krnl_reu_write_entry(unsigned char slot);
 
-static void format_reu_volume(void)
+static void format_reu_volume(unsigned char force)
 {
     unsigned char key;
 
-    if (reu_detected != 2) {
-        cputs("M: se requiere una REU de 16 MiB.\r\n");
+    if (!reu_slots) {
+        cputs("M: requiere una REU de al menos 128 KiB.\r\n");
         return;
     }
-    if (mounted) {
-        cputs("M: ya esta formateada y montada.\r\n");
+    if (mounted && !force) {
+        cputs("M: ya montada. Use FORMAT M: /F.\r\n");
         return;
     }
 
-    cputs("Formatear M:? Se inicializara el directorio. (S/N) ");
+    cputs("Formatear M:? Se borraran archivos y sesiones. (S/N) ");
     do {
         key = cgetc();
     } while (key != 's' && key != 'S' && key != 'n' && key != 'N' && key != CH_ESC);
@@ -554,12 +554,14 @@ void main(void)
     cputs(" de VRAM. CPU: 2 MHz.\r\n");
     cputs("A: IEC 8.\r\n");
     reu_detected = krnl_reu_probe();
-    if (reu_detected == 2) {
-        cputs("REU detectada: 16 MiB.\r\n");
-    } else if (reu_detected) {
-        cputs("REU detectada.\r\n");
+    if (reu_detected > 1) {
+        reu_slots = reu_detected > 16 ? 16 : reu_detected - 1;
+        cputs("REU detectada: ");
+        print_unsigned(reu_detected == KRNL_REU_16MIB ? 16384u :
+                       (unsigned int)reu_detected << 6, 0, ' ');
+        cputs(" KiB.\r\n");
+        mounted = krnl_reu_mount();
     }
-    if (reu_detected == 2) mounted = krnl_reu_mount();
     krnl_session_boot_notice();
     krnl_keyboard_bind_help();
     cputs("\r\nEscriba HELP o pulse la tecla HELP para ayuda.\r\n");
@@ -582,7 +584,7 @@ void main(void)
             if (current_drive == REU_DRIVE) {
                 unsigned char slot, used = 0;
                 cputs("Directorio M:\r\n\r\n");
-                for (slot = 0; slot < 16; ++slot) {
+                for (slot = 0; slot < reu_slots; ++slot) {
                     krnl_reu_dir_read(slot);
                     if (*reu_dir_name) {
                         unsigned int tenths = (reu_dir_size >> 10) * 10 +
@@ -601,7 +603,7 @@ void main(void)
                 if (used) cputs("\r\n");
                 print_unsigned((unsigned int)used << 6, 0, ' ');
                 cputs(" KiB utilizados, ");
-                print_unsigned(1024u - ((unsigned int)used << 6), 0, ' ');
+                print_unsigned((unsigned int)(reu_slots - used) << 6, 0, ' ');
                 cputs(" KiB libres\r\n");
             } else {
                 show_directory();
@@ -660,15 +662,17 @@ void main(void)
             if (mounted) {
                 current_drive = REU_DRIVE;
                 cputs("Unidad activa: M: (REU)\r\n");
-            } else if (reu_detected == 2) {
+            } else if (reu_slots) {
                 cputs("M: volumen sin formato valido. Use FORMAT M:.\r\n");
             } else if (reu_detected) {
-                cputs("M: la REU detectada no es compatible. Se requieren 16 MiB.\r\n");
+                cputs("M: la REU no tiene capacidad suficiente.\r\n");
             } else {
                 cputs("M: no se detecto una REU.\r\n");
             }
-        } else if (strcmp(command_upper, "FORMAT M:") == 0) {
-            format_reu_volume();
+        } else if (!strcmp(command_upper, "FORMAT M:")) {
+            format_reu_volume(0);
+        } else if (!strcmp(command_upper, "FORMAT M: /F")) {
+            format_reu_volume(1);
         } else if (*command != '\0' && !run_implicit(command)) {
             cputs("Comando invalido\r\n");
         }

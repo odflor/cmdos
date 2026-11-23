@@ -13,7 +13,7 @@ static unsigned char read_page(unsigned int skip, char names[][17])
     unsigned char count = 0, result;
 
     if (!KRNL_REQUEST.device) {
-        for (result = 0; result < 16; ++result) {
+        for (result = 0; result < reu_slots; ++result) {
             krnl_reu_dir_read(result);
             if (!*reu_dir_name || reu_dir_type != KRNL_REQUEST.style) continue;
             if (skip) --skip;

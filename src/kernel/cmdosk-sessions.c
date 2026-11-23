@@ -76,7 +76,7 @@ static unsigned char choose_session(unsigned char from_app, unsigned char discar
         memcpy(label, "Interprete", 11);
         label += 11;
     }
-    for (slot = 0; slot < 16; ++slot) {
+    for (slot = 0; slot < reu_slots; ++slot) {
         if (!session_entry(slot) ||
             (!discard && !krnl_swap_available(slot, KRNL_CONTEXT_SIZE))) continue;
         targets[count++] = slot;
@@ -122,7 +122,7 @@ static unsigned char select_session(unsigned char from_app)
 
     if (slot != SESSION_DISCARD) return slot;
     slot = choose_session(0, 1);
-    if (slot < 16 && session_entry(slot)) {
+    if (slot < reu_slots && session_entry(slot)) {
         swap_message("Descartar sesion? S/N/Esc");
         if (confirm()) remove_session(slot);
     }
@@ -134,7 +134,7 @@ void krnl_session_boot_notice(void)
     unsigned char slot;
 
     if (!mounted) return;
-    for (slot = 0; slot < 16; ++slot) {
+    for (slot = 0; slot < reu_slots; ++slot) {
         if (session_entry(slot) && krnl_swap_available(slot, KRNL_CONTEXT_SIZE)) {
             cputs("Sesiones en M:. Use Alt+Tab.\r\n");
             return;
@@ -147,7 +147,7 @@ unsigned char krnl_session_confirm_exit(void)
     unsigned char slot, found = 0;
 
     if (!mounted) return 1;
-    for (slot = 0; slot < 16; ++slot) {
+    for (slot = 0; slot < reu_slots; ++slot) {
         if (!session_entry(slot)) continue;
         if (!found) cputs("Sesiones suspendidas en M:\r\n");
         found = 1;
@@ -167,8 +167,8 @@ void krnl_session_suspend(void)
     unsigned char i, target;
 
     if (!mounted) {
-        swap_error(reu_detected == 2 ? " M: sin formato. Use FORMAT M:."
-                                     : " M: requiere una REU de 16 MiB.");
+        swap_error(reu_slots ? " M: sin formato. Use FORMAT M:."
+                                     : " M: requiere una REU compatible.");
         return;
     }
     if (session_disk_busy()) return;
@@ -196,7 +196,7 @@ static void resume_session(unsigned char slot)
     unsigned char device;
     char name[17];
 
-    if (slot >= 16 || session_disk_busy()) return;
+    if (slot >= reu_slots || session_disk_busy()) return;
     krnl_reu_dir_read(slot);
     if (!*reu_dir_name || reu_dir_type != KRNL_SWAP_TYPE) return;
     strcpy(name, reu_dir_name);

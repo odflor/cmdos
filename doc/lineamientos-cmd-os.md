@@ -28,7 +28,7 @@ seleccionar un destino.
 - Desarrollar para Commodore 128 en modo nativo, con CC65 (`-t c128`), C para el intérprete y ca65 para el arranque de aplicaciones. La consola usa el VDC de 80 columnas y las rutinas de pantalla, teclado y disco de CC65/KERNAL.
 - El artefacto principal es `build/cmd-os.d71` para la 1571 del dispositivo 8. `build.ps1` empaqueta `boot`, `hello.cmd`, `mem.cmd`, `copy.cmd`, `help.cmd` y `edit.cmd` con `c1541`. `tools/make-boot-sector.ps1` instala y reserva la pista 1, sector 0. El sector carga `BOOT` mediante el KERNAL y salta a `$1C01`. El runtime inicializa las pilas y la BSS sin pasar por BASIC 7.0.
 - La MMU deja visible la RAM en `$4000–$BFFF` y conserva el KERNAL, el editor de pantalla y la E/S. CMD-OS selecciona el VDC de 80 columnas, desactiva la salida de 40 columnas y activa el modo de 2 MHz.
-- `run-vice.ps1` monta la imagen con `x128`. Los scripts apuntan a rutas de CC65 y VICE en `D:`. `boot.cmd` es otro lanzador de VICE con rutas absolutas y un disco adicional en el dispositivo 9.
+- `run-vice.ps1` monta la imagen con `x128`. El parámetro `-ReuSize` selecciona la capacidad de la REU virtual en KiB. El valor predeterminado es 16384. Los scripts apuntan a rutas de CC65 y VICE en `D:`. `boot.cmd` es otro lanzador de VICE con rutas absolutas y un disco adicional en el dispositivo 9.
 
 ## Consola y discos
 
@@ -42,7 +42,7 @@ seleccionar un destino.
 | `VER` | Muestra la versión. |
 | `EXIT` | Enumera las sesiones suspendidas y pide confirmación si las hay. Después indica que se puede apagar. |
 | `M:` | Selecciona el volumen REU montado. |
-| `FORMAT M:` | Inicializa el volumen tras pedir confirmación. |
+| `FORMAT M: [/F]` | Inicializa el volumen tras pedir confirmación. `/F` permite reformatear un volumen montado y borrar sus archivos y sesiones suspendidas. |
 | `COPY origen destino`, `DEL nombre` | Copia con unidades explícitas y borra en la unidad activa. |
 | `STATUS` | Muestra el último código de salida CMDP. |
 
@@ -101,7 +101,7 @@ Los nombres de archivo distinguen mayúsculas de minúsculas. CMD-OS usa minúsc
 
 Hasta nuevo aviso, en todo CMD-OS, Enter con el nombre vacío abre el selector de la unidad activa, filtrado al tipo que corresponda a la operación. Las flechas arriba y abajo recorren la lista y Enter elige el archivo. Esc cancela desde el campo de nombre, el selector o un diálogo de confirmación. Un nombre ya escrito o sugerido se acepta con Enter. El editor utiliza el servicio común `KRNL_TUI_PICK_FILE` con el filtro SEQ. Al elegir un archivo distinto del actual como destino de guardado, el editor pide confirmar su reemplazo.
 
-El editor lee archivos SEQ de la unidad activa, acepta finales CR, LF o CRLF y guarda en PETSCII con final CR. El límite de 34 KiB corresponde al documento una vez normalizados los saltos de línea. El diálogo de guardado propone el nombre actual. Para reemplazarlo, el editor escribe y cierra `cmdos-edit.tmp`, conserva el original como `cmdos-edit.bak` durante el cambio de nombre y limpia el respaldo después de confirmar la operación. La unidad debe tener espacio para el temporal. El editor redibuja solo los caracteres que cambiaron y, en las ediciones que conservan el ajuste de línea, evita recorrer todo el documento visible.
+El editor lee archivos SEQ de la unidad activa, acepta finales CR, LF o CRLF y guarda en PETSCII con final CR. El límite de 34 KiB corresponde al documento una vez normalizados los saltos de línea. El diálogo de guardado propone el nombre actual. Al recibir un nombre por parámetro o en los diálogos de apertura y guardado, `EDIT` agrega `.txt` si el nombre carece de extensión. El nombre completo debe caber en 16 caracteres. Las extensiones explícitas y los nombres elegidos en el selector se conservan. Para reemplazarlo, el editor escribe y cierra `cmdos-edit.tmp`, conserva el original como `cmdos-edit.bak` durante el cambio de nombre y limpia el respaldo después de confirmar la operación. La unidad debe tener espacio para el temporal. El editor redibuja solo los caracteres que cambiaron y, en las ediciones que conservan el ajuste de línea, evita recorrer todo el documento visible.
 
 ## Aplicaciones externas
 
@@ -132,8 +132,7 @@ En Bank 1 se mantiene la misma idea de área temporal. Lo que cambia es el banco
 
 ### Estado confirmado de M: y memoria
 
-El arranque informa la VRAM del VDC y detecta la REU. `M:` usa una REU
-de 16 MiB y el formato v2 con 16 ranuras de 64 KiB. Cada archivo admite
+El arranque informa la VRAM del VDC y la capacidad de la REU. `M:` usa el formato v2. El banco 0 de la REU se reserva para los metadatos y cada banco siguiente aporta una ranura de 64 KiB, hasta un máximo de 16. Así, 128, 256 y 512 KiB ofrecen 1, 3 y 7 ranuras, respectivamente, y 16 MiB ofrece 16. Cada archivo admite
 hasta 65.535 bytes. `DIR` muestra el tamaño real, el tipo IEC y los totales
 asignado y libre por ranuras. Cada fila de `M:` muestra el tamaño en KiB,
 el nombre entre comillas y el tipo IEC. Una línea en blanco separa la

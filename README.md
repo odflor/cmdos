@@ -4,7 +4,7 @@
 
 Command-OS es un entorno de trabajo al estilo DOS para el Commodore 128 en modo nativo. Arranca desde una imagen D71 en la unidad 1571 del dispositivo 8, usa la pantalla VDC de 80 columnas y trabaja con la CPU a 2 MHz. Al iniciar, informa la memoria de video instalada y la presencia de una REU.
 
-El proyecto reúne una consola de comandos, un editor de texto SEQ y servicios compartidos para aplicaciones nativas. Con una REU compatible de 16 MiB, también ofrece el disco en memoria `M:` y permite suspender aplicaciones de Bank 1 y retomarlas más tarde. Command-OS está en desarrollo. Los archivos por lotes y el soporte de NeoRAM Remix quedan para una etapa posterior.
+El proyecto reúne una consola de comandos, un editor de texto SEQ y servicios compartidos para aplicaciones nativas. Con una REU compatible de 128 KiB o más, también ofrece el disco en memoria `M:` y permite suspender aplicaciones de Bank 1 y retomarlas más tarde. Command-OS está en desarrollo. Los archivos por lotes y el soporte de NeoRAM Remix quedan para una etapa posterior.
 
 ## 2. Ayuda para el usuario final
 
@@ -17,7 +17,7 @@ En VICE, montá `build/cmd-os.d71` en la 1571 del dispositivo 8 y seleccioná la
 | `RUN nombre [argumentos]` | Ejecuta un programa de la unidad activa. También podés escribir directamente su nombre y omitir la extensión `.cmd`. |
 | `COPY origen destino` | Copia archivos PRG, SEQ o USR. Indicá las dos unidades, por ejemplo `COPY A:edit.cmd M:edit.cmd`. Si el destino existe, la copia se rechaza. |
 | `DEL nombre` | Borra un archivo de la unidad activa. |
-| `FORMAT M:`, `M:` | Inicializan el disco REU tras confirmar y seleccionan el volumen montado, respectivamente. |
+| `FORMAT M: [/F]`, `M:` | Inicializan el disco REU y seleccionan el volumen montado, respectivamente. `/F` permite reformatear un volumen montado. El formateo siempre pide confirmación y borra los archivos y las sesiones suspendidas. |
 | `STATUS`, `MEM`, `VER` | Muestran el último código de salida de un CMDP, el mapa de memoria y la versión del sistema, respectivamente. |
 | `EXIT` | Indica cuándo se puede apagar. Si hay sesiones suspendidas, las lista y pide confirmación. |
 
@@ -25,7 +25,7 @@ Los nombres de archivo distinguen mayúsculas y minúsculas. Admiten hasta 16 ca
 
 ### Editar documentos
 
-`EDIT` abre un documento vacío. `EDIT notas.seq` abre el SEQ indicado en la unidad activa. Si el archivo aún no existe, inicia un documento vacío y propone ese nombre al guardar. El editor admite documentos de hasta 34 KiB en IEC o en `M:`.
+`EDIT` abre un documento vacío. `EDIT notas` abre `notas.txt` en la unidad activa. El editor agrega `.txt` a los nombres sin extensión, y conserva las extensiones explícitas. Los documentos siguen siendo archivos SEQ. Si el archivo aún no existe, inicia un documento vacío y propone ese nombre al guardar. El editor admite documentos de hasta 34 KiB en IEC o en `M:`.
 
 - **F1** abre un archivo. En el diálogo de apertura, Enter con el nombre vacío muestra el selector de archivos SEQ.
 - **F3** guarda. **F7** abre los menús. Elegí **Archivo → Guardar como** para usar otro nombre y **Archivo → Salir** para volver a la consola.
@@ -33,7 +33,7 @@ Los nombres de archivo distinguen mayúsculas y minúsculas. Admiten hasta 16 ca
 
 ### Usar M: y cambiar de sesión
 
-`M:` tiene 16 ranuras de 64 KiB y admite hasta 65.535 bytes por archivo. `DIR` muestra el tamaño y el tipo IEC de cada entrada, además del espacio asignado y libre por ranuras. Los documentos y las sesiones suspendidas comparten esas ranuras.
+`M:` usa ranuras de 64 KiB y admite hasta 65.535 bytes por archivo. Con 128, 256 o 512 KiB de REU quedan disponibles 1, 3 o 7 ranuras, respectivamente. La primera zona de 64 KiB queda reservada para los metadatos del volumen. El máximo actual es de 16 ranuras, también con una REU de 16 MiB. `DIR` muestra el tamaño y el tipo IEC de cada entrada, además del espacio asignado y libre por ranuras. Los documentos y las sesiones suspendidas comparten esas ranuras. Suspender una sesión o reemplazar un documento desde EDIT requiere una ranura libre para el intercambio o el archivo temporal.
 
 Con `M:` montado, pulsá **Alt+Tab** desde el editor o la consola. En VICE, usá **Ctrl+Y** si el sistema anfitrión captura el atajo. Desde el editor podés elegir el intérprete u otra sesión suspendida. Desde la consola podés reanudar una sesión o elegir **Descartar** y confirmar su eliminación. **Esc** vuelve a la pantalla activa. El cambio de sesión requiere que los canales de disco estén cerrados. Si la REU conserva su contenido al reiniciar, Command-OS anuncia las sesiones recuperables.
 
@@ -64,7 +64,7 @@ $viceBin = 'D:\Program Files (x86)\GTK3VICE-3.9-win64\bin'
 .\run-vice.ps1 -ViceBin $viceBin
 ```
 
-El build genera `build/cmd-os.d71` con el sector de arranque, `boot` y los CMDP `hello.cmd`, `mem.cmd`, `copy.cmd`, `help.cmd` y `edit.cmd`. También deja los binarios intermedios y el mapa de enlace `build/boot.map`. El lanzador abre la imagen principal en la 1571 del dispositivo 8 y configura el emulador con 80 columnas, 16 KiB de VRAM y 16 MiB de REU. Para probar el arranque, ejecutá `DIR`, `HELP`, `MEM` y `EDIT` en la consola.
+El build genera `build/cmd-os.d71` con el sector de arranque, `boot` y los CMDP `hello.cmd`, `mem.cmd`, `copy.cmd`, `help.cmd` y `edit.cmd`. También deja los binarios intermedios y el mapa de enlace `build/boot.map`. El lanzador abre la imagen principal en la 1571 del dispositivo 8 y configura el emulador con 80 columnas, 16 KiB de VRAM y 16 MiB de REU por defecto. Usá `-ReuSize 128`, `-ReuSize 256` o `-ReuSize 512` para probar los tamaños estándar. Para probar el arranque, ejecutá `DIR`, `HELP`, `MEM` y `EDIT` en la consola.
 
 ## 5. Filosofía de Command-OS
 

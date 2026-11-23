@@ -94,11 +94,11 @@ int main(void)
               bank1, sizeof(bank1) / sizeof(bank1[0]));
     KRNL_REQUEST.operation = KRNL_REU_STATUS;
     ((void (*)(void))0x0E00)();
-    if (KRNL_REQUEST.result == KRNL_REU_16MIB)
-        cputs("REU: 16 MiB (banco de 8 MiB verificado)\r\n");
-    else if (KRNL_REQUEST.result == KRNL_REU_PRESENT)
-        cputs("REU: detectada, capacidad sin confirmar\r\n");
-    else
-        cputs("REU: no detectada\r\n");
+    if (KRNL_REQUEST.result > 1) {
+        cprintf("REU: %u KiB\r\n", KRNL_REQUEST.result == KRNL_REU_16MIB ? 16384u :
+                (unsigned int)KRNL_REQUEST.result << 6);
+    } else {
+        cputs("REU: no detectada o sin capacidad suficiente\r\n");
+    }
     return 0;
 }

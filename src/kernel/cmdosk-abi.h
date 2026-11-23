@@ -47,11 +47,8 @@ enum cmdosk_operation {
 #define KRNL_DISK_NOT_FOUND 62
 #define KRNL_DISK_ERROR 0xFE
 
-enum krnl_reu_result {
-    KRNL_REU_ABSENT = 0x50,
-    KRNL_REU_PRESENT = 0x51,
-    KRNL_REU_16MIB = 0x52
-};
+/* REU_STATUS returns the number of 64 KiB banks, with $FF for 16 MiB. */
+#define KRNL_REU_16MIB 0xFF
 
 /* KRNL_COPY: x and y are source and destination devices (0 means M:).
  * data holds two NUL-terminated names at offsets 0 and 17. */
@@ -67,7 +64,7 @@ enum cmdosk_copy_result {
  * NUL-terminated PETSCII label per item. Result is the 1-based item
  * index across all groups, or zero on cancel or invalid input.
  * The kernel clears the menu footprint on exit. The caller repaints it. */
-extern unsigned char reu_detected;
+extern unsigned char reu_detected, reu_slots;
 extern unsigned char mounted;
 
 /* KRNL_ARGS returns the NUL-terminated PETSCII argument tail in data. */

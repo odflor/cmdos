@@ -5,7 +5,7 @@ int main(void)
     cputs("\r\nCommand-OS - HELP\r\n\r\n"
           "A: B: C: D:      Selecciona la unidad IEC 8, 9, 10 u 11.\r\n"
           "M:               Selecciona el volumen en la REU si esta montado.\r\n"
-          "FORMAT M:        Inicializa M: si no esta montado. Pide confirmacion.\r\n"
+          "FORMAT M: [/F]   Inicializa M:. /F permite reformatear. Pide confirmacion.\r\n"
           "DIR              Lista archivos, tipos, tamanos y espacio de la unidad.\r\n"
           "RUN nombre [args] Ejecuta un CMDP de la unidad activa con sus argumentos.\r\n"
           "nombre [args]     Ejecuta el CMDP sin escribir RUN. La extension .cmd es\r\n"
@@ -34,6 +34,7 @@ int main(void)
     clrscr();
     cputs("Command-OS - EDITOR Y SESIONES\r\n\r\n"
           "EDIT [archivo]   Abre un SEQ o propone ese nombre al guardar.\r\n"
+          "Sin extension, EDIT agrega .txt. Los documentos se guardan como SEQ.\r\n"
           "F1 Abre          Enter sin nombre muestra el selector de archivos.\r\n"
           "F2 Inicio        F3 Guardar        F4 Fin        F7 Menu\r\n"
           "Guardar como     Se elige desde el menu Archivo.\r\n"

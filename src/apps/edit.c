@@ -290,6 +290,16 @@ static unsigned char browse_name(char* name)
     return 2;
 }
 
+static unsigned char complete_name(char* name)
+{
+    if (!krnl_valid_filename(name)) return 0;
+    if (!strchr(name, '.')) {
+        if (strlen(name) + sizeof(".txt") - 1 > FILENAME_MAX) return 0;
+        strcat(name, ".txt");
+    }
+    return 1;
+}
+
 static unsigned char ask_name(const char* title, char* name, const char* suggestion)
 {
     unsigned char count, value, suggested;
@@ -309,7 +319,7 @@ static unsigned char ask_name(const char* title, char* name, const char* suggest
         }
         if (value == CH_ENTER || value == 10) {
             if (!count) return browse_name(name);
-            if (krnl_valid_filename(name)) return 1;
+            if (suggested || complete_name(name)) return 1;
             popup(title, " Nombre invalido. Corrija el nombre o pulse Esc");
         }
         if (value == CH_DEL && count) {
@@ -510,11 +520,10 @@ int main(void)
     call(KRNL_TUI_CLEAR);
     call(KRNL_ARGS);
     if (KRNL_REQUEST.data[0]) {
+        status = "Nombre de archivo invalido";
         if (krnl_valid_filename((const char*)KRNL_REQUEST.data)) {
             strcpy(name, (const char*)KRNL_REQUEST.data);
-            load_document(name, 1);
-        } else {
-            status = "Nombre de archivo invalido";
+            if (complete_name(name)) load_document(name, 1);
         }
     }
     for (;;) {
